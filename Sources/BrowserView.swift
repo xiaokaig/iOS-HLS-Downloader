@@ -3,7 +3,7 @@ import WebKit
 
 struct BrowserView: UIViewRepresentable {
     let address: String
-    let onCapture: (URL) -> Void
+    let onCapture: (URL, [HTTPCookie]) -> Void
     let onAddressChange: (String) -> Void
 
     func makeCoordinator() -> Coordinator {
@@ -48,6 +48,7 @@ struct BrowserView: UIViewRepresentable {
         configuration.userContentController = controller
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        context.coordinator.webView = webView
         webView.allowsBackForwardNavigationGestures = true
         if let url = URL(string: address), url.scheme == "https" || url.scheme == "http" {
             webView.load(URLRequest(url: url))
@@ -65,17 +66,26 @@ struct BrowserView: UIViewRepresentable {
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
-        var onCapture: (URL) -> Void
+        weak var webView: WKWebView?
+        var onCapture: (URL, [HTTPCookie]) -> Void
         var onAddressChange: (String) -> Void
 
-        init(onCapture: @escaping (URL) -> Void, onAddressChange: @escaping (String) -> Void) {
+        init(onCapture: @escaping (URL, [HTTPCookie]) -> Void, onAddressChange: @escaping (String) -> Void) {
             self.onCapture = onCapture
             self.onAddressChange = onAddressChange
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let value = message.body as? String, let url = URL(string: value) else { return }
-            onCapture(url)
+            guard let webView else {
+                onCapture(url, [])
+                return
+            }
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+                DispatchQueue.main.async {
+                    self?.onCapture(url, cookies)
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

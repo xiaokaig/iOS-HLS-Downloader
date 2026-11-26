@@ -3,6 +3,7 @@ import SwiftUI
 struct ContentView: View {
     @State private var address = "https://example.com"
     @State private var candidates: [URL] = []
+    @State private var candidateCookies: [String: [HTTPCookie]] = [:]
     @State private var selectedCandidate: URL?
     @State private var errorMessage: String?
     @StateObject private var downloader = HLSDownloadManager()
@@ -108,7 +109,8 @@ struct ContentView: View {
         address = raw
     }
 
-    private func addCandidate(_ url: URL) {
+    private func addCandidate(_ url: URL, cookies: [HTTPCookie]) {
+        candidateCookies[url.absoluteString] = cookies
         guard !candidates.contains(where: { $0.absoluteString == url.absoluteString }) else { return }
         candidates.insert(url, at: 0)
         if candidates.count > 20 { candidates.removeLast(candidates.count - 20) }
@@ -118,7 +120,7 @@ struct ContentView: View {
         errorMessage = nil
         Task {
             do {
-                _ = try await downloader.start(url: url)
+                _ = try await downloader.start(url: url, cookies: candidateCookies[url.absoluteString] ?? [])
             } catch {
                 errorMessage = error.localizedDescription
             }

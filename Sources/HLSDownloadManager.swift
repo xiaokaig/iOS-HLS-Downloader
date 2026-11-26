@@ -35,7 +35,7 @@ final class HLSDownloadManager: ObservableObject {
 
     private var keyCache: [URL: Data] = [:]
 
-    func start(url: URL) async throws -> URL {
+    func start(url: URL, cookies: [HTTPCookie] = []) async throws -> URL {
         guard !isDownloading else { throw HLSDownloadError.unsupportedPlaylist }
         isDownloading = true
         progress = 0
@@ -47,7 +47,7 @@ final class HLSDownloadManager: ObservableObject {
         var playlistURL = url
         var playlist: HLSPlaylist?
         for _ in 0..<4 {
-            let text = try await fetchText(playlistURL)
+            let text = try await fetchText(playlistURL, cookies: cookies)
             let parsed = try HLSParser.parse(text, baseURL: playlistURL)
             if parsed.variants.isEmpty {
                 playlist = parsed
@@ -80,13 +80,13 @@ final class HLSDownloadManager: ObservableObject {
         for (index, segment) in mediaPlaylist.segments.enumerated() {
             status = "下载分片 \(index + 1)/\(total)"
             if let map = segment.map, map != lastMap {
-                let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange)
+                let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange, cookies: cookies)
                 defer { try? FileManager.default.removeItem(at: mapTemp.fileURL) }
                 if let key = segment.key {
                     guard key.method == "AES-128", key.keyFormat == "identity", key.iv != nil else {
                         throw HLSDownloadError.unsupportedEncryption
                     }
-                    let keyData = try await fetchKey(key)
+                    let keyData = try await fetchKey(key, cookies: cookies)
                     let bytes = try readDownloadedBytes(mapTemp, range: map.byteRange)
                     let clear = try decryptAES128(bytes, key: keyData, iv: key.iv!)
                     try output.write(contentsOf: clear)
@@ -96,13 +96,13 @@ final class HLSDownloadManager: ObservableObject {
                 lastMap = map
             }
 
-            let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange)
+            let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange, cookies: cookies)
             defer { try? FileManager.default.removeItem(at: temp.fileURL) }
             if let key = segment.key {
                 guard key.method == "AES-128", key.keyFormat == "identity", key.url != nil else {
                     throw HLSDownloadError.unsupportedEncryption
                 }
-                let keyData = try await fetchKey(key)
+                let keyData = try await fetchKey(key, cookies: cookies)
                 let iv = key.iv ?? sequenceIV(segment.sequence)
                 let encrypted = try readDownloadedBytes(temp, range: segment.byteRange)
                 let clear = try decryptAES128(encrypted, key: keyData, iv: iv)
@@ -125,9 +125,10 @@ final class HLSDownloadManager: ObservableObject {
         return destination
     }
 
-    private func fetchText(_ url: URL) async throws -> String {
+    private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> String {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        applyCookies(cookies, for: url, to: &request)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HLSDownloadError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw HLSDownloadError.httpStatus(http.statusCode) }
@@ -135,11 +136,12 @@ final class HLSDownloadManager: ObservableObject {
         return text
     }
 
-    private func fetchKey(_ key: HLSKey) async throws -> Data {
+    private func fetchKey(_ key: HLSKey, cookies: [HTTPCookie]) async throws -> Data {
         guard let url = key.url else { throw HLSDownloadError.unsupportedEncryption }
         if let cached = keyCache[url] { return cached }
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
+        applyCookies(cookies, for: url, to: &request)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw HLSDownloadError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw HLSDownloadError.httpStatus(http.statusCode) }
@@ -148,9 +150,10 @@ final class HLSDownloadManager: ObservableObject {
         return data
     }
 
-    private func fetchTemporaryFile(_ url: URL, range: HLSByteRange?) async throws -> (fileURL: URL, statusCode: Int) {
+    private func fetchTemporaryFile(_ url: URL, range: HLSByteRange?, cookies: [HTTPCookie]) async throws -> (fileURL: URL, statusCode: Int) {
         var request = URLRequest(url: url)
         request.timeoutInterval = 120
+        applyCookies(cookies, for: url, to: &request)
         if let range {
             request.setValue("bytes=\(range.offset)-\(range.offset + range.length - 1)", forHTTPHeaderField: "Range")
         }
@@ -199,6 +202,21 @@ final class HLSDownloadManager: ObservableObject {
             return data
         }
         return try Data(contentsOf: item.fileURL, options: [.mappedIfSafe])
+    }
+
+
+    private func applyCookies(_ cookies: [HTTPCookie], for url: URL, to request: inout URLRequest) {
+        guard let host = url.host?.lowercased() else { return }
+        let matching = cookies.filter { cookie in
+            let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let domainMatches = host == domain || host.hasSuffix("." + domain)
+            let pathMatches = url.path.hasPrefix(cookie.path)
+            let secureMatches = !cookie.isSecure || url.scheme?.lowercased() == "https"
+            return domainMatches && pathMatches && secureMatches
+        }
+        if let cookieHeader = HTTPCookie.requestHeaderFields(with: matching)["Cookie"] {
+            request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+        }
     }
 
     private func sequenceIV(_ sequence: Int) -> Data {
