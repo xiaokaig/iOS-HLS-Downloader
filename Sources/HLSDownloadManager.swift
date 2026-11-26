@@ -212,7 +212,7 @@ final class HLSDownloadManager: ObservableObject {
                 finalURL = try await remuxTransportStream(destination)
             } catch {
                 // Keep the valid TS file; never disguise it with an .mp4 extension.
-                conversionWarning = "MP4 转换失败，已保留 TS 文件：\\(error.localizedDescription)"
+                conversionWarning = "MP4 转换失败，已保留 TS 文件：\(error.localizedDescription)"
             }
         }
         outputURL = finalURL
@@ -315,13 +315,13 @@ final class HLSDownloadManager: ObservableObject {
                 throw NSError(
                     domain: error.domain,
                     code: error.code,
-                    userInfo: [NSLocalizedDescriptionKey: "MP4 导出失败（\\(error.domain) / \\(error.code)）：\\(error.localizedDescription)"]
+                    userInfo: [NSLocalizedDescriptionKey: "MP4 导出失败（\(error.domain) / \(error.code)）：\(error.localizedDescription)"]
                 )
             }
             throw NSError(
                 domain: "HLSDownloader.MP4Conversion",
                 code: Int(exporter.status.rawValue),
-                userInfo: [NSLocalizedDescriptionKey: "MP4 导出未完成，状态：\\(exporter.status.rawValue)"]
+                userInfo: [NSLocalizedDescriptionKey: "MP4 导出未完成，状态：\(exporter.status.rawValue)"]
             )
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
