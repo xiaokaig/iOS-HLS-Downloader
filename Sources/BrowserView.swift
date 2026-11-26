@@ -18,7 +18,7 @@ struct BrowserView: UIViewRepresentable {
             try {
               const raw = value && value.url ? value.url : value;
               const absolute = new URL(String(raw), location.href).href;
-              if (/\\.m3u8(?:[?#]|$)/i.test(absolute)) {
+              if (/m3u8(?:[?#]|$)/i.test(absolute)) {
                 window.webkit.messageHandlers.hls.postMessage(absolute);
               }
             } catch (_) {}
