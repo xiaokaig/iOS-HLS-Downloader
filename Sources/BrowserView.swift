@@ -64,7 +64,7 @@ struct BrowserView: UIViewRepresentable {
         }
     }
 
-    final class Coordinator: NSObject, WKNavigationDelegate {
+    final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
         var onCapture: (URL) -> Void
         var onAddressChange: (String) -> Void
 
