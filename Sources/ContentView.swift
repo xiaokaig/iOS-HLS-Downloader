@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import WebKit
+import UIKit
 
 struct ContentView: View {
     @StateObject private var downloader = HLSDownloadManager()
@@ -128,6 +129,13 @@ struct ContentView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer()
+                                Button {
+                                    UIPasteboard.general.string = url.absoluteString
+                                } label: {
+                                    Label("复制", systemImage: "doc.on.doc")
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
                                 Button("查看") {
                                     inspect(url, cookies: candidateCookies[url.absoluteString] ?? [])
                                 }
@@ -230,6 +238,12 @@ struct ContentView: View {
                                 }
                             }
                             Spacer(minLength: 0)
+                        }
+                        if let warning = downloader.conversionWarning {
+                            Label(warning, systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         if let output = downloader.outputURL {
                             ShareLink(item: output) {
