@@ -34,6 +34,7 @@ final class HLSDownloadManager: ObservableObject {
     @Published private(set) var status = "等待下载"
     @Published private(set) var outputURL: URL?
     @Published private(set) var isDownloading = false
+    @Published private(set) var conversionWarning: String?
 
     private var keyCache: [URL: Data] = [:]
 
@@ -49,6 +50,7 @@ final class HLSDownloadManager: ObservableObject {
         isDownloading = true
         progress = 0
         outputURL = nil
+        conversionWarning = nil
         keyCache.removeAll()
         status = "读取播放列表…"
         defer { isDownloading = false }
@@ -206,13 +208,22 @@ final class HLSDownloadManager: ObservableObject {
         var finalURL = destination
         if !hasMap {
             status = "正在尝试 MP4 转封装…"
-            if let converted = try? await remuxTransportStream(destination) {
-                finalURL = converted
+            do {
+                finalURL = try await remuxTransportStream(destination)
+            } catch {
+                // Keep the valid TS file; never disguise it with an .mp4 extension.
+                conversionWarning = "MP4 转换失败，已保留 TS 文件：\\(error.localizedDescription)"
             }
         }
         outputURL = finalURL
         try? FileManager.default.removeItem(at: taskDirectory)
-        status = finalURL.pathExtension.lowercased() == "mp4" ? "下载完成（MP4）" : "下载完成（TS）"
+        if finalURL.pathExtension.lowercased() == "mp4" {
+            status = "下载完成（MP4）"
+        } else if conversionWarning != nil {
+            status = "下载完成（TS，MP4 转换失败）"
+        } else {
+            status = "下载完成（TS）"
+        }
         return finalURL
     }
 
@@ -263,9 +274,27 @@ final class HLSDownloadManager: ObservableObject {
 
     private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
         let asset = AVURLAsset(url: sourceURL)
-        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough),
-              exporter.supportedFileTypes.contains(.mp4) else {
-            throw HLSDownloadError.unsupportedPlaylist
+        let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
+        let preferredPresets = [
+            AVAssetExportPresetPassthrough,
+            AVAssetExportPresetHighestQuality,
+            AVAssetExportPresetMediumQuality
+        ]
+
+        var exporter: AVAssetExportSession?
+        for preset in preferredPresets where compatiblePresets.contains(preset) {
+            guard let candidate = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
+            if candidate.supportedFileTypes.contains(.mp4) {
+                exporter = candidate
+                break
+            }
+        }
+        guard let exporter else {
+            throw NSError(
+                domain: "HLSDownloader.MP4Conversion",
+                code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "系统无法将该 TS 视频导出为 MP4（当前编码或容器不受支持）"]
+            )
         }
 
         let destination = sourceURL.deletingPathExtension().appendingPathExtension("mp4")
@@ -282,7 +311,18 @@ final class HLSDownloadManager: ObservableObject {
 
         guard exporter.status == .completed else {
             try? FileManager.default.removeItem(at: destination)
-            throw exporter.error ?? HLSDownloadError.invalidResponse
+            if let error = exporter.error as NSError? {
+                throw NSError(
+                    domain: error.domain,
+                    code: error.code,
+                    userInfo: [NSLocalizedDescriptionKey: "MP4 导出失败（\\(error.domain) / \\(error.code)）：\\(error.localizedDescription)"]
+                )
+            }
+            throw NSError(
+                domain: "HLSDownloader.MP4Conversion",
+                code: Int(exporter.status.rawValue),
+                userInfo: [NSLocalizedDescriptionKey: "MP4 导出未完成，状态：\\(exporter.status.rawValue)"]
+            )
         }
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         guard ((attributes[FileAttributeKey.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
