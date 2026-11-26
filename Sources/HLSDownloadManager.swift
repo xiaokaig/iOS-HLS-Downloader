@@ -86,7 +86,12 @@ final class HLSDownloadManager: ObservableObject {
         let total = mediaPlaylist.segments.count
         let taskDirectory = persistentTaskDirectory(for: playlistURL)
         try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
-        let signature = mediaPlaylist.segments.map { $0.url.absoluteString }.joined(separator: "\n")
+        let signature = mediaPlaylist.segments.map { segment in
+            let range = segment.byteRange.map { String($0.offset) + ":" + String($0.length) } ?? "-"
+            let key = segment.key.map { $0.method + ":" + ($0.url?.absoluteString ?? "-") + ":" + ($0.iv?.base64EncodedString() ?? "sequence-iv") + ":" + $0.keyFormat } ?? "clear"
+            let map = segment.map.map { $0.url.absoluteString + ":" + String($0.byteRange?.offset ?? 0) + ":" + String($0.byteRange?.length ?? 0) } ?? "-"
+            return String(segment.sequence) + "|" + segment.url.absoluteString + "|" + range + "|" + key + "|" + map
+        }.joined(separator: "\n")
         let signatureURL = taskDirectory.appendingPathComponent("playlist.signature")
         if let saved = try? String(contentsOf: signatureURL, encoding: .utf8), saved != signature {
             try? FileManager.default.removeItem(at: taskDirectory)
