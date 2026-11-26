@@ -48,9 +48,14 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(item: $playingURL) { url in
-            VideoPlayer(player: AVPlayer(url: url))
-                .ignoresSafeArea()
+        .sheet(isPresented: Binding(
+            get: { playingURL != nil },
+            set: { if !$0 { playingURL = nil } }
+        )) {
+            if let url = playingURL {
+                VideoPlayer(player: AVPlayer(url: url))
+                    .ignoresSafeArea()
+            }
         }
         .alert("操作未完成", isPresented: Binding(
             get: { errorMessage != nil },
