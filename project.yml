@@ -1,0 +1,25 @@
+name: HLSDownloader
+options:
+  bundleIdPrefix: com.xiaokaig
+  deploymentTarget:
+    iOS: "16.0"
+  generateEmptyDirectories: true
+
+targets:
+  HLSDownloader:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.xiaokaig.hlsdownloader
+        PRODUCT_NAME: HLSDownloader
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIFileSharingEnabled: YES
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        INFOPLIST_KEY_UIUserInterfaceStyle: Automatic
+        IPHONEOS_DEPLOYMENT_TARGET: "16.0"
+        CODE_SIGNING_ALLOWED: NO
