@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import CommonCrypto
+import AVFoundation
 
 enum HLSDownloadError: LocalizedError {
     case invalidResponse
@@ -34,6 +35,13 @@ final class HLSDownloadManager: ObservableObject {
     @Published private(set) var isDownloading = false
 
     private var keyCache: [URL: Data] = [:]
+
+    func variants(for url: URL, cookies: [HTTPCookie] = []) async throws -> [HLSVariant] {
+        status = "解析清晰度…"
+        let text = try await fetchText(url, cookies: cookies)
+        let parsed = try HLSParser.parse(text, baseURL: url)
+        return parsed.variants
+    }
 
     func start(url: URL, cookies: [HTTPCookie] = []) async throws -> URL {
         guard !isDownloading else { throw HLSDownloadError.unsupportedPlaylist }
@@ -115,13 +123,54 @@ final class HLSDownloadManager: ObservableObject {
         }
 
         try output.synchronize()
+        try output.close()
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
         guard ((attributes[FileAttributeKey.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
             try? FileManager.default.removeItem(at: destination)
             throw HLSDownloadError.emptyDownload
         }
-        outputURL = destination
-        status = "下载完成"
+
+        var finalURL = destination
+        if !hasMap {
+            status = "正在尝试 MP4 转封装…"
+            if let converted = try? await remuxTransportStream(destination) {
+                finalURL = converted
+            }
+        }
+        outputURL = finalURL
+        status = finalURL.pathExtension.lowercased() == "mp4" ? "下载完成（MP4）" : "下载完成（TS）"
+        return finalURL
+    }
+
+    private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
+        let asset = AVURLAsset(url: sourceURL)
+        guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough),
+              exporter.supportedFileTypes.contains(.mp4) else {
+            throw HLSDownloadError.unsupportedPlaylist
+        }
+
+        let destination = sourceURL.deletingPathExtension().appendingPathExtension("mp4")
+        try? FileManager.default.removeItem(at: destination)
+        exporter.outputURL = destination
+        exporter.outputFileType = .mp4
+        exporter.shouldOptimizeForNetworkUse = true
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            exporter.exportAsynchronously {
+                continuation.resume()
+            }
+        }
+
+        guard exporter.status == .completed else {
+            try? FileManager.default.removeItem(at: destination)
+            throw exporter.error ?? HLSDownloadError.invalidResponse
+        }
+        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
+        guard ((attributes[FileAttributeKey.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
+            try? FileManager.default.removeItem(at: destination)
+            throw HLSDownloadError.emptyDownload
+        }
+        try? FileManager.default.removeItem(at: sourceURL)
         return destination
     }
 

@@ -4,7 +4,8 @@ struct ContentView: View {
     @State private var address = "https://example.com"
     @State private var candidates: [URL] = []
     @State private var candidateCookies: [String: [HTTPCookie]] = [:]
-    @State private var selectedCandidate: URL?
+    @State private var variantOptions: [HLSVariant] = []
+    @State private var pendingCookies: [HTTPCookie] = []
     @State private var errorMessage: String?
     @StateObject private var downloader = HLSDownloadManager()
 
@@ -55,9 +56,8 @@ struct ContentView: View {
                                         .lineLimit(1)
                                 }
                                 Spacer()
-                                Button("下载") {
-                                    selectedCandidate = candidate
-                                    startDownload(candidate)
+                                Button("解析") {
+                                    inspectCandidate(candidate)
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .disabled(downloader.isDownloading)
@@ -66,6 +66,34 @@ struct ContentView: View {
                     }
                     .padding()
                     .frame(maxHeight: 190)
+                }
+
+                if !variantOptions.isEmpty {
+                    Divider()
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("选择清晰度")
+                            .font(.headline)
+                        ForEach(variantOptions) { variant in
+                            Button {
+                                let cookies = pendingCookies
+                                variantOptions = []
+                                startDownload(variant.url, cookies: cookies)
+                            } label: {
+                                HStack {
+                                    Text(variant.resolution ?? "分辨率未知")
+                                    Spacer()
+                                    Text(variant.bandwidth > 0 ? String(format: "%.1f Mbps", Double(variant.bandwidth) / 1_000_000) : "码率未知")
+                                        .foregroundStyle(.secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(downloader.isDownloading)
+                        }
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .frame(maxHeight: 180)
                 }
 
                 VStack(spacing: 6) {
@@ -116,11 +144,29 @@ struct ContentView: View {
         if candidates.count > 20 { candidates.removeLast(candidates.count - 20) }
     }
 
-    private func startDownload(_ url: URL) {
+    private func inspectCandidate(_ url: URL) {
+        let cookies = candidateCookies[url.absoluteString] ?? []
         errorMessage = nil
         Task {
             do {
-                _ = try await downloader.start(url: url, cookies: candidateCookies[url.absoluteString] ?? [])
+                let variants = try await downloader.variants(for: url, cookies: cookies)
+                if variants.isEmpty {
+                    startDownload(url, cookies: cookies)
+                } else {
+                    pendingCookies = cookies
+                    variantOptions = variants
+                }
+            } catch {
+                errorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func startDownload(_ url: URL, cookies: [HTTPCookie]) {
+        errorMessage = nil
+        Task {
+            do {
+                _ = try await downloader.start(url: url, cookies: cookies)
             } catch {
                 errorMessage = error.localizedDescription
             }
