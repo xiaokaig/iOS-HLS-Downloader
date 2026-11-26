@@ -216,6 +216,7 @@ final class HLSDownloadManager: ObservableObject {
         }
         var output = [UInt8](repeating: 0, count: input.count + kCCBlockSizeAES128)
         var moved: size_t = 0
+        let outputCapacity = output.count
         let status = key.withUnsafeBytes { keyBytes in
             iv.withUnsafeBytes { ivBytes in
                 input.withUnsafeBytes { inputBytes in
@@ -230,7 +231,7 @@ final class HLSDownloadManager: ObservableObject {
                             inputBytes.baseAddress,
                             input.count,
                             outputBytes.baseAddress,
-                            output.count,
+                            outputCapacity,
                             &moved
                         )
                     }
