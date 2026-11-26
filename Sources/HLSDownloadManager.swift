@@ -116,7 +116,7 @@ final class HLSDownloadManager: ObservableObject {
 
         try output.synchronize()
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        guard ((attributes[.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
+        guard ((attributes[FileAttributeKey.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
             try? FileManager.default.removeItem(at: destination)
             throw HLSDownloadError.emptyDownload
         }
