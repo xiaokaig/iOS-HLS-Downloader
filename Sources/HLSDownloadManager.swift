@@ -40,6 +40,7 @@ final class HLSDownloadManager: ObservableObject {
         isDownloading = true
         progress = 0
         outputURL = nil
+        keyCache.removeAll()
         status = "读取播放列表…"
         defer { isDownloading = false }
 
@@ -63,8 +64,7 @@ final class HLSDownloadManager: ObservableObject {
 
         let hasMap = mediaPlaylist.segments.contains { $0.map != nil }
         let ext = hasMap ? "mp4" : "ts"
-        let filename = "HLS-\(Date().formatted(.iso8601.year().month().day().timeZone(.gmt).time(includingFractionalSeconds: false))).\(ext)"
-            .replacingOccurrences(of: ":", with: "-")
+        let filename = "HLS-\(Int(Date().timeIntervalSince1970)).\(ext)"
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let destination = documents.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: destination)
@@ -81,12 +81,14 @@ final class HLSDownloadManager: ObservableObject {
             status = "下载分片 \(index + 1)/\(total)"
             if let map = segment.map, map != lastMap {
                 let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange)
-                deferRemove(mapTemp.fileURL)
-                if let key = segment.key, key.method == "AES-128" {
-                    guard let iv = key.iv else { throw HLSDownloadError.unsupportedEncryption }
+                defer { try? FileManager.default.removeItem(at: mapTemp.fileURL) }
+                if let key = segment.key {
+                    guard key.method == "AES-128", key.keyFormat == "identity", key.iv != nil else {
+                        throw HLSDownloadError.unsupportedEncryption
+                    }
                     let keyData = try await fetchKey(key)
                     let bytes = try readDownloadedBytes(mapTemp, range: map.byteRange)
-                    let clear = try decryptAES128(bytes, key: keyData, iv: iv)
+                    let clear = try decryptAES128(bytes, key: keyData, iv: key.iv!)
                     try output.write(contentsOf: clear)
                 } else {
                     try appendDownloadedFile(mapTemp, range: map.byteRange, to: output)
@@ -95,9 +97,9 @@ final class HLSDownloadManager: ObservableObject {
             }
 
             let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange)
-            deferRemove(temp.fileURL)
+            defer { try? FileManager.default.removeItem(at: temp.fileURL) }
             if let key = segment.key {
-                guard key.method == "AES-128", key.keyFormat == "identity", let keyURL = key.url else {
+                guard key.method == "AES-128", key.keyFormat == "identity", key.url != nil else {
                     throw HLSDownloadError.unsupportedEncryption
                 }
                 let keyData = try await fetchKey(key)
@@ -114,7 +116,7 @@ final class HLSDownloadManager: ObservableObject {
 
         try output.synchronize()
         let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        guard (attributes[.size] as? NSNumber)?.int64Value ?? 0 > 0 else {
+        guard ((attributes[.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
             try? FileManager.default.removeItem(at: destination)
             throw HLSDownloadError.emptyDownload
         }
@@ -159,10 +161,6 @@ final class HLSDownloadManager: ObservableObject {
             throw HLSDownloadError.invalidRange
         }
         return (fileURL, http.statusCode)
-    }
-
-    private func deferRemove(_ url: URL) {
-        // Temporary downloads are removed immediately after their segment has been appended.
     }
 
     private func appendDownloadedFile(_ item: (fileURL: URL, statusCode: Int), range: HLSByteRange?, to output: FileHandle) throws {
@@ -217,7 +215,7 @@ final class HLSDownloadManager: ObservableObject {
             throw HLSDownloadError.invalidKey
         }
         var output = [UInt8](repeating: 0, count: input.count + kCCBlockSizeAES128)
-        var moved = 0
+        var moved: size_t = 0
         let status = key.withUnsafeBytes { keyBytes in
             iv.withUnsafeBytes { ivBytes in
                 input.withUnsafeBytes { inputBytes in
@@ -240,6 +238,6 @@ final class HLSDownloadManager: ObservableObject {
             }
         }
         guard status == kCCSuccess else { throw HLSDownloadError.invalidResponse }
-        return Data(output.prefix(moved))
+        return Data(output.prefix(Int(moved)))
     }
 }
