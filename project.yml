@@ -14,6 +14,7 @@ targets:
     info:
       path: Support/Info.plist
       properties:
+        UILaunchScreen: {}
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         UIUserInterfaceStyle: Automatic
