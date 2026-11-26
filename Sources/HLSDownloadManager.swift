@@ -86,18 +86,44 @@ final class HLSDownloadManager: ObservableObject {
         let total = mediaPlaylist.segments.count
         let taskDirectory = persistentTaskDirectory(for: playlistURL)
         try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
-        let signature = mediaPlaylist.segments.map { segment in
-            let range = segment.byteRange.map { String($0.offset) + ":" + String($0.length) } ?? "-"
-            let key = segment.key.map { $0.method + ":" + ($0.url?.absoluteString ?? "-") + ":" + ($0.iv?.base64EncodedString() ?? "sequence-iv") + ":" + $0.keyFormat } ?? "clear"
-            let map = segment.map.map { $0.url.absoluteString + ":" + String($0.byteRange?.offset ?? 0) + ":" + String($0.byteRange?.length ?? 0) } ?? "-"
-            return String(segment.sequence) + "|" + segment.url.absoluteString + "|" + range + "|" + key + "|" + map
-        }.joined(separator: "\n")
+        var signatureLines: [String] = []
+        signatureLines.reserveCapacity(mediaPlaylist.segments.count)
+        for segment in mediaPlaylist.segments {
+            let range: String
+            if let byteRange = segment.byteRange {
+                range = String(byteRange.offset) + ":" + String(byteRange.length)
+            } else {
+                range = "-"
+            }
+
+            let key: String
+            if let encryption = segment.key {
+                let keyURL = encryption.url?.absoluteString ?? "-"
+                let iv = encryption.iv?.base64EncodedString() ?? "sequence-iv"
+                key = encryption.method + ":" + keyURL + ":" + iv + ":" + encryption.keyFormat
+            } else {
+                key = "clear"
+            }
+
+            let map: String
+            if let initialization = segment.map {
+                let offset = initialization.byteRange?.offset ?? 0
+                let length = initialization.byteRange?.length ?? 0
+                map = initialization.url.absoluteString + ":" + String(offset) + ":" + String(length)
+            } else {
+                map = "-"
+            }
+
+            let line = String(segment.sequence) + "|" + segment.url.absoluteString + "|" + range + "|" + key + "|" + map
+            signatureLines.append(line)
+        }
+        let signature = signatureLines.joined(separator: "\n")
         let signatureURL = taskDirectory.appendingPathComponent("playlist.signature")
-        if let saved = try? String(contentsOf: signatureURL, encoding: .utf8), saved != signature {
+        if let saved = try? String(contentsOf: signatureURL, encoding: String.Encoding.utf8), saved != signature {
             try? FileManager.default.removeItem(at: taskDirectory)
             try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
         }
-        try signature.write(to: signatureURL, atomically: true, encoding: .utf8)
+        try signature.write(to: signatureURL, atomically: true, encoding: String.Encoding.utf8)
 
         status = "并发下载分片…"
         var completed = 0
