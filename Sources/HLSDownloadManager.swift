@@ -2,6 +2,7 @@ import Foundation
 import Combine
 import CommonCrypto
 import AVFoundation
+import CryptoKit
 
 enum HLSDownloadError: LocalizedError {
     case invalidResponse
@@ -82,11 +83,51 @@ final class HLSDownloadManager: ObservableObject {
         let output = try FileHandle(forWritingTo: destination)
         defer { try? output.close() }
 
-        var lastMap: HLSMap?
         let total = mediaPlaylist.segments.count
+        let taskDirectory = persistentTaskDirectory(for: playlistURL)
+        try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
+        let signature = mediaPlaylist.segments.map { $0.url.absoluteString }.joined(separator: "\n")
+        let signatureURL = taskDirectory.appendingPathComponent("playlist.signature")
+        if let saved = try? String(contentsOf: signatureURL, encoding: .utf8), saved != signature {
+            try? FileManager.default.removeItem(at: taskDirectory)
+            try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
+        }
+        try signature.write(to: signatureURL, atomically: true, encoding: .utf8)
 
+        status = "并发下载分片…"
+        var completed = 0
+        try await withThrowingTaskGroup(of: (Int, Int).self) { group in
+            var nextIndex = 0
+            let concurrency = 6
+            while nextIndex < min(concurrency, total) {
+                let index = nextIndex
+                let segment = mediaPlaylist.segments[index]
+                group.addTask {
+                    try await self.downloadSegmentToCache(
+                        segment, index: index, directory: taskDirectory, cookies: cookies
+                    )
+                }
+                nextIndex += 1
+            }
+            while let _ = try await group.next() {
+                completed += 1
+                self.progress = Double(completed) / Double(total) * 0.75
+                if nextIndex < total {
+                    let index = nextIndex
+                    let segment = mediaPlaylist.segments[index]
+                    group.addTask {
+                        try await self.downloadSegmentToCache(
+                            segment, index: index, directory: taskDirectory, cookies: cookies
+                        )
+                    }
+                    nextIndex += 1
+                }
+            }
+        }
+
+        status = "按顺序组装视频…"
+        var lastMap: HLSMap?
         for (index, segment) in mediaPlaylist.segments.enumerated() {
-            status = "下载分片 \(index + 1)/\(total)"
             if let map = segment.map, map != lastMap {
                 let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange, cookies: cookies)
                 defer { try? FileManager.default.removeItem(at: mapTemp.fileURL) }
@@ -104,22 +145,23 @@ final class HLSDownloadManager: ObservableObject {
                 lastMap = map
             }
 
-            let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange, cookies: cookies)
-            defer { try? FileManager.default.removeItem(at: temp.fileURL) }
+            let cached = cachedSegmentURL(index: index, directory: taskDirectory)
+            let statusCode = (try? String(contentsOf: cachedStatusURL(index: index, directory: taskDirectory), encoding: .utf8))
+                .flatMap(Int.init) ?? 200
+            let item = (fileURL: cached, statusCode: statusCode)
             if let key = segment.key {
                 guard key.method == "AES-128", key.keyFormat == "identity", key.url != nil else {
                     throw HLSDownloadError.unsupportedEncryption
                 }
                 let keyData = try await fetchKey(key, cookies: cookies)
                 let iv = key.iv ?? sequenceIV(segment.sequence)
-                let encrypted = try readDownloadedBytes(temp, range: segment.byteRange)
+                let encrypted = try readDownloadedBytes(item, range: segment.byteRange)
                 let clear = try decryptAES128(encrypted, key: keyData, iv: iv)
                 try output.write(contentsOf: clear)
             } else {
-                try appendDownloadedFile(temp, range: segment.byteRange, to: output)
+                try appendDownloadedFile(item, range: segment.byteRange, to: output)
             }
-
-            progress = Double(index + 1) / Double(total)
+            progress = 0.75 + Double(index + 1) / Double(total) * 0.25
         }
 
         try output.synchronize()
@@ -138,8 +180,54 @@ final class HLSDownloadManager: ObservableObject {
             }
         }
         outputURL = finalURL
+        try? FileManager.default.removeItem(at: taskDirectory)
         status = finalURL.pathExtension.lowercased() == "mp4" ? "下载完成（MP4）" : "下载完成（TS）"
         return finalURL
+    }
+
+    private func persistentTaskDirectory(for url: URL) -> URL {
+        let digest = SHA256.hash(data: Data(url.absoluteString.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HLSDownloadTasks", isDirectory: true)
+        return root.appendingPathComponent(digest, isDirectory: true)
+    }
+
+    private func cachedSegmentURL(index: Int, directory: URL) -> URL {
+        directory.appendingPathComponent(String(format: "segment-%06d.bin", index))
+    }
+
+    private func cachedStatusURL(index: Int, directory: URL) -> URL {
+        directory.appendingPathComponent(String(format: "segment-%06d.status", index))
+    }
+
+    private func downloadSegmentToCache(
+        _ segment: HLSSegment, index: Int, directory: URL, cookies: [HTTPCookie]
+    ) async throws -> (Int, Int) {
+        let destination = cachedSegmentURL(index: index, directory: directory)
+        let statusFile = cachedStatusURL(index: index, directory: directory)
+        if FileManager.default.fileExists(atPath: destination.path),
+           let raw = try? String(contentsOf: statusFile, encoding: .utf8),
+           let status = Int(raw) {
+            return (index, status)
+        }
+
+        var lastError: Error = HLSDownloadError.invalidResponse
+        for attempt in 1...3 {
+            do {
+                let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange, cookies: cookies)
+                try? FileManager.default.removeItem(at: destination)
+                try FileManager.default.moveItem(at: temp.fileURL, to: destination)
+                try String(temp.statusCode).write(to: statusFile, atomically: true, encoding: .utf8)
+                return (index, temp.statusCode)
+            } catch {
+                lastError = error
+                if attempt < 3 {
+                    try await Task.sleep(for: .seconds(attempt))
+                }
+            }
+        }
+        throw lastError
     }
 
     private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
