@@ -7,7 +7,8 @@ A native iPhone app with an embedded WKWebView browser for finding and downloadi
 - Detects M3U8 URLs observed through Fetch, XHR, and WebKit resource timing.
 - Parses master and media playlists and displays available master-playlist variants for quality selection.
 - Handles explicit and implicit BYTERANGE offsets for media segments and initialization maps.
-- Downloads each media segment to a temporary file and appends it to the output incrementally.
+- Downloads media segments with a six-worker concurrent scheduler, then assembles them in playlist order.
+- Persists completed segment files under Application Support so a repeated download of the same playlist can reuse completed segments after an interruption; failed segments are retried up to three times.
 - Supports identity AES-128-CBC encrypted media segments and playlist-derived IVs.
 - Copies matching WKWebView cookies into URLSession requests for playlist, key, map, and segment URLs.
 - Writes fMP4 playlists with EXT-X-MAP as .mp4.
@@ -20,7 +21,9 @@ This is an early prototype, not a finished downloader:
 
 - Only finite VOD playlists with EXT-X-ENDLIST are accepted; live playlists are rejected.
 - TS-to-MP4 conversion depends on AVFoundation supporting the source stream; there is no bundled FFmpeg remuxer.
-- Encrypted fMP4 initialization maps, SAMPLE-AES, DRM, low-latency HLS, discontinuity handling, pause/resume, automatic retries, and background continuation are not implemented.
+- The current resume cache is keyed by the playlist URL and is reused when the same download is started again; there is not yet a persisted in-app task list or one-tap automatic recovery UI.
+- Pause/resume controls and a dedicated background URLSession implementation are not yet implemented. iOS may suspend ordinary foreground URLSession work when the app enters the background; completed segment files remain cached, but uninterrupted background downloading is not guaranteed.
+- Encrypted fMP4 initialization maps, SAMPLE-AES, DRM, low-latency HLS, and discontinuity handling are not implemented.
 - Cookie forwarding is supported, but arbitrary site-specific request headers and JavaScript-generated authorization headers are not captured.
 - WebView sniffing is best-effort and cannot observe every protected or non-WebKit media pipeline.
 
