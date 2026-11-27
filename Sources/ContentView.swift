@@ -10,6 +10,12 @@ struct ContentView: View {
     @StateObject private var library = BrowserLibraryStore()
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
+    @State private var showingBrowserMenu = false
+    @State private var showingMoreMenu = false
+    @State private var showingTabOverview = false
+    @AppStorage("browserDesktopMode") private var browserDesktopMode = false
+    @AppStorage("browserStripMobilePrefix") private var browserStripMobilePrefix = false
+    @AppStorage("browserZoomLevel") private var browserZoomLevel = 1.0
     @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
     @AppStorage("videoSniffingEnabled") private var videoSniffingEnabled = false
     @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
@@ -50,17 +56,9 @@ struct ContentView: View {
                 .tabItem { Label("浏览器", systemImage: "safari") }
                 .tag(0)
 
-            downloadsTab
-                .tabItem { Label("下载", systemImage: "arrow.down.circle") }
+            moreTab
+                .tabItem { Label("更多", systemImage: "ellipsis.circle") }
                 .tag(1)
-
-            filesTab
-                .tabItem { Label("文件", systemImage: "folder") }
-                .tag(2)
-
-            settingsTab
-                .tabItem { Label("设置", systemImage: "gearshape") }
-                .tag(3)
         }
         .tint(.blue)
         .onAppear {
@@ -104,41 +102,57 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("主页 · 搜索或输入网址", text: $browserAddress)
-                        .keyboardType(.URL).textInputAutocapitalization(.never)
-                        .autocorrectionDisabled().submitLabel(.go).onSubmit(loadBrowserAddress)
-                    if browserController.isLoading { ProgressView().controlSize(.small) }
-                    Button {
-                        toggleCurrentBookmark()
-                    } label: {
-                        Image(systemName: currentPageIsBookmarked ? "bookmark.fill" : "bookmark")
-                            .font(.system(size: 16, weight: .semibold))
+                    TextField("搜索或输入网址", text: $browserAddress)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .submitLabel(.go)
+                        .onSubmit(loadBrowserAddress)
+                    if browserController.isLoading {
+                        Button { browserController.stopLoading() } label: {
+                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                        }
+                    } else {
+                        Button { browserController.reload() } label: {
+                            Image(systemName: "arrow.clockwise").foregroundStyle(.secondary)
+                        }.disabled(currentPageURL == nil)
                     }
-                    .disabled(currentPageURL == nil)
-                    Button(action: loadBrowserAddress) { Image(systemName: "arrow.right").font(.system(size: 16, weight: .semibold)) }
+                    Button(action: toggleCurrentBookmark) {
+                        Image(systemName: currentPageIsBookmarked ? "bookmark.fill" : "bookmark")
+                    }.disabled(currentPageURL == nil)
                 }
-                .padding(.horizontal, 15).frame(height: 48)
+                .font(.system(size: 16))
+                .padding(.horizontal, 14)
+                .frame(height: 46)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
-                .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.18)))
-                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+                .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.2)))
+                .padding(.horizontal, 14).padding(.vertical, 8)
+
                 ZStack {
-                    BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
-                                onAddressChange: { value in
-                                    browserAddress = value
-                                    if let url = URL(string: value) {
-                                        library.recordVisit(url: url, title: url.host ?? value)
-                                    }
-                                }, isSniffingEnabled: hlsSniffingEnabled,
-                                isVideoSniffingEnabled: videoSniffingEnabled,
-                                isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
-                                isPopupBlockingEnabled: popupBlockingEnabled,
-                                customAdDomains: customAdDomains)
-                        .id(browserController.webViewID)
-                    if browserAddress.isEmpty {
-                        VStack(spacing: 24) {
+                    BrowserView(
+                        address: browserAddress,
+                        controller: browserController,
+                        onCapture: addCandidate,
+                        onAddressChange: { value in
+                            browserAddress = value
+                            if let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                                library.recordVisit(url: url, title: browserController.webView?.title ?? url.host ?? value)
+                            }
+                        },
+                        isSniffingEnabled: hlsSniffingEnabled,
+                        isVideoSniffingEnabled: videoSniffingEnabled,
+                        isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
+                        isPopupBlockingEnabled: popupBlockingEnabled,
+                        customAdDomains: customAdDomains,
+                        isDesktopMode: browserDesktopMode
+                    )
+                    .id(browserController.webViewID)
+
+                    if browserAddress.isEmpty && currentPageURL == nil {
+                        VStack(spacing: 22) {
                             Spacer()
                             VStack(spacing: 8) {
-                                Image(systemName: "safari").font(.system(size: 42, weight: .light)).foregroundStyle(.blue)
+                                Image(systemName: "safari").font(.system(size: 44, weight: .light)).foregroundStyle(.blue)
                                 Text("轻装上网").font(.title3.weight(.semibold))
                                 Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
                             }
@@ -148,130 +162,205 @@ struct ContentView: View {
                                 browserShortcut("GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
                                 browserShortcut("YouTube", icon: "play.rectangle", url: "https://www.youtube.com")
                             }
-                            Spacer(); Spacer()
+                            Spacer()
                         }
-                        .padding(.horizontal, 20).background(Color(uiColor: .systemBackground))
+                        .padding(.horizontal, 18)
+                        .background(Color(uiColor: .systemBackground))
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                VStack(spacing: 10) {
-                    HStack(spacing: 0) {
-                        browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
-                        browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
-                        browserTool("house") { browserAddress = ""; browserController.goHome() }
-                        Spacer(minLength: 18)
-                        browserTool(browserController.isLoading ? "xmark" : "arrow.clockwise",
-                                    disabled: !browserController.isLoading && browserAddress.isEmpty) {
-                            if browserController.isLoading { browserController.stopLoading() }
-                            else { browserController.reload() }
-                        }
-                    }
-                    .padding(.horizontal, 4)
 
-                    HStack(spacing: 9) {
-                        browserLibraryTool("历史", symbol: "clock.arrow.circlepath") { showingBrowsingHistory = true }
-                        browserLibraryTool("书签", symbol: "bookmark") { showingBookmarks = true }
-                        Button { showingBrowserCandidates = true } label: {
-                            HStack(spacing: 7) {
-                                Image(systemName: "dot.radiowaves.left.and.right")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Text("嗅探").font(.subheadline.weight(.semibold))
-                                Spacer(minLength: 0)
-                                if !candidates.isEmpty {
-                                    Text("\(candidates.count)")
-                                        .font(.caption2.weight(.bold))
-                                        .monospacedDigit()
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 6).padding(.vertical, 3)
-                                        .background(Color.blue, in: Capsule())
-                                }
-                            }
-                            .foregroundStyle(candidates.isEmpty ? Color.primary : Color.blue)
-                            .padding(.horizontal, 12)
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .background(Color(uiColor: .secondarySystemGroupedBackground),
-                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        }
-                        .buttonStyle(.plain)
+                HStack(spacing: 0) {
+                    browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
+                    browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
+                    browserTool("house") { browserAddress = ""; browserController.goHome() }
+                    Button { showingTabOverview = true } label: {
+                        Image(systemName: "square.on.square")
+                            .font(.system(size: 19, weight: .medium))
+                            .frame(maxWidth: .infinity, minHeight: 48)
                     }
+                    .buttonStyle(.plain)
+                    Button { showingBrowserMenu = true } label: {
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "line.3.horizontal")
+                                .font(.system(size: 19, weight: .medium))
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                            if !candidates.isEmpty {
+                                Circle().fill(.blue).frame(width: 7, height: 7).offset(x: -12, y: 9)
+                            }
+                        }
+                    }
+                    .buttonStyle(.plain)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 10)
-                .padding(.bottom, 8)
+                .padding(.horizontal, 8)
                 .background(.ultraThinMaterial)
                 .overlay(alignment: .top) {
-                    Rectangle().fill(Color(uiColor: .separator).opacity(0.18)).frame(height: 0.5)
+                    Rectangle().fill(Color(uiColor: .separator).opacity(0.2)).frame(height: 0.5)
                 }
             }
-            .background(Color(uiColor: .systemBackground)).navigationBarHidden(true)
-            .sheet(isPresented: $showingBrowserCandidates) {
-                NavigationStack {
-                    List {
-                        if candidates.isEmpty {
-                            VStack(spacing: 10) {
-                                Image(systemName: "dot.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(.secondary)
-                                Text("暂未发现视频").font(.headline)
-                                Text("播放网页中的视频后，检测到 HLS 地址会显示在这里。")
-                                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            }
-                            .frame(maxWidth: .infinity).padding(.vertical, 28)
-                        } else {
-                            ForEach(candidates, id: \.absoluteString) { url in
-                                VStack(alignment: .leading, spacing: 8) {
-                                    HStack {
-                                        Image(systemName: "film").foregroundStyle(.blue)
-                                        Text(url.lastPathComponent.isEmpty ? "视频流" : url.lastPathComponent)
-                                            .font(.subheadline.weight(.semibold)).lineLimit(1)
-                                        Spacer()
-                                        if url.pathExtension.lowercased() == "m3u8" && candidateMetadata[candidateKey(url)] != "普通视频直链 · 可复制地址" {
-                                            Button("解析") {
-                                                showingBrowserCandidates = false
-                                                inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
-                                            }
-                                            .buttonStyle(.borderedProminent).controlSize(.small)
-                                        }
-                                    }
-                                    Text(url.host ?? url.absoluteString).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
-                                    Text(candidateMetadata[candidateKey(url)] ?? "正在识别播放列表…")
-                                        .font(.caption).foregroundStyle(.blue)
-                                    HStack(spacing: 16) {
-                                        Button { UIPasteboard.general.string = url.absoluteString } label: {
-                                            Label("复制地址", systemImage: "doc.on.doc")
-                                        }
-                                        .font(.caption)
-                                        if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
-                                            Button {
-                                                showingBrowserCandidates = false
-                                                startDirectVideoDownload(url, cookies: candidateCookies[candidateKey(url)] ?? [])
-                                            } label: {
-                                                Label("下载", systemImage: "arrow.down.circle.fill")
-                                            }
-                                            .font(.caption.weight(.semibold))
-                                            .foregroundStyle(.blue)
-                                            .disabled(directDownloader.isDownloading || downloader.isDownloading)
-                                        }
-                                    }
-                                }.padding(.vertical, 5)
-                            }
-                        }
-                    }
-                    .navigationTitle("视频嗅探").navigationBarTitleDisplayMode(.inline)
-                    .toolbar {
-                        ToolbarItem(placement: .topBarLeading) { Button("关闭") { showingBrowserCandidates = false } }
-                        ToolbarItem(placement: .topBarTrailing) {
-                            Button("清空") {
-                                candidates.removeAll()
-                                candidateCookies.removeAll()
-                                candidateMetadata.removeAll()
-                            }.disabled(candidates.isEmpty)
-                        }
-                    }
-                }
-                .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
-            }
+            .background(Color(uiColor: .systemBackground))
+            .navigationBarHidden(true)
+            .sheet(isPresented: $showingBrowserCandidates) { browserCandidatesSheet }
             .sheet(isPresented: $showingBrowsingHistory) { browsingHistorySheet }
             .sheet(isPresented: $showingBookmarks) { browserBookmarksSheet }
+            .sheet(isPresented: $showingBrowserMenu) {
+                browserMenuSheet
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+            .sheet(isPresented: $showingTabOverview) {
+                tabOverviewSheet
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
         }
+    }
+
+    private var browserCandidatesSheet: some View {
+        NavigationStack {
+            List {
+                if candidates.isEmpty {
+                    ContentUnavailableView("暂未发现视频", systemImage: "dot.radiowaves.left.and.right",
+                                           description: Text("播放网页中的视频后，识别到的资源会显示在这里。"))
+                } else {
+                    ForEach(candidates, id: \.absoluteString) { url in
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Image(systemName: "film").foregroundStyle(.blue)
+                                Text(url.lastPathComponent.isEmpty ? "视频流" : url.lastPathComponent)
+                                    .font(.subheadline.weight(.semibold)).lineLimit(1)
+                                Spacer()
+                                if url.pathExtension.lowercased() == "m3u8" {
+                                    Button("解析") {
+                                        showingBrowserCandidates = false
+                                        inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                    }.buttonStyle(.borderedProminent).controlSize(.small)
+                                }
+                            }
+                            Text(url.host ?? url.absoluteString).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                            Text(candidateMetadata[candidateKey(url)] ?? "正在识别…")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Button { UIPasteboard.general.string = url.absoluteString } label: {
+                                    Label("复制地址", systemImage: "doc.on.doc")
+                                }
+                                if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
+                                    Button {
+                                        showingBrowserCandidates = false
+                                        startDirectVideoDownload(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                    } label: { Label("下载", systemImage: "arrow.down.circle") }
+                                }
+                            }.font(.caption)
+                        }.padding(.vertical, 5)
+                    }
+                }
+            }
+            .navigationTitle("视频嗅探")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("关闭") { showingBrowserCandidates = false } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("清空") {
+                        candidates.removeAll()
+                        candidateCookies.removeAll()
+                        candidateMetadata.removeAll()
+                    }.disabled(candidates.isEmpty)
+                }
+            }
+        }
+    }
+
+    private var browserMenuSheet: some View {
+        NavigationStack {
+            List {
+                Section("浏览器") {
+                    menuAction("历史记录", icon: "clock.arrow.circlepath") { showingBrowserMenu = false; showingBrowsingHistory = true }
+                    menuAction("书签", icon: "bookmark") { showingBrowserMenu = false; showingBookmarks = true }
+                    menuAction("视频嗅探（\(candidates.count)）", icon: "dot.radiowaves.left.and.right") { showingBrowserMenu = false; showingBrowserCandidates = true }
+                    menuAction("分享网页", icon: "square.and.arrow.up") {
+                        if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
+                        showingBrowserMenu = false
+                    }
+                }
+                Section("网页显示") {
+                    Toggle("桌面版网站", isOn: $browserDesktopMode)
+                        .onChange(of: browserDesktopMode) { _ in browserController.reload() }
+                    Toggle("桌面版时去除 m. 前缀", isOn: $browserStripMobilePrefix)
+                        .disabled(!browserDesktopMode)
+                    HStack {
+                        Text("网页缩放")
+                        Spacer()
+                        Button { browserZoomLevel = max(0.5, browserZoomLevel - 0.1); applyBrowserZoom() } label: { Image(systemName: "minus.circle") }
+                        Text("\(Int(browserZoomLevel * 100))%").monospacedDigit().frame(minWidth: 48)
+                        Button { browserZoomLevel = min(2.0, browserZoomLevel + 0.1); applyBrowserZoom() } label: { Image(systemName: "plus.circle") }
+                        Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
+                    }
+                }
+                Section("页面操作") {
+                    menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
+                    menuAction("复制当前网址", icon: "doc.on.doc") {
+                        if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
+                        showingBrowserMenu = false
+                    }
+                    menuAction("更多功能与设置", icon: "ellipsis.circle") { showingBrowserMenu = false; selectedTab = 1 }
+                }
+            }
+            .listStyle(.insetGrouped)
+            .navigationTitle("浏览器菜单")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { showingBrowserMenu = false } } }
+        }
+    }
+
+    private var tabOverviewSheet: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Image(systemName: "square.on.square").font(.system(size: 36)).foregroundStyle(.secondary)
+                Text("当前标签页").font(.headline)
+                Text(currentPageURL?.host ?? "起始页").font(.subheadline).foregroundStyle(.secondary)
+                Text("当前版本暂时保留单个活动网页；多标签页独立 WebView 与恢复机制将在后续版本完善。")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .padding(.horizontal)
+                Button("新建起始页") {
+                    browserAddress = ""
+                    browserController.rebuildWebView()
+                    showingTabOverview = false
+                }.buttonStyle(.borderedProminent)
+                Spacer()
+            }.padding(.top, 30)
+            .navigationTitle("标签页")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { showingTabOverview = false } } }
+        }
+    }
+
+    private var moreTab: some View {
+        NavigationStack {
+            List {
+                Section("管理") {
+                    NavigationLink { downloadsTab } label: { Label("下载管理", systemImage: "arrow.down.circle") }
+                    NavigationLink { filesTab } label: { Label("文件管理", systemImage: "folder") }
+                }
+                Section("设置") {
+                    NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
+                }
+                Section("关于") {
+                    LabeledContent("版本", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                    LabeledContent("浏览器内核", value: "WKWebView")
+                }
+            }
+            .navigationTitle("更多")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private func menuAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) { Label(title, systemImage: icon) }
+    }
+
+    private func applyBrowserZoom() {
+        let script = "document.documentElement.style.zoom = '\(browserZoomLevel)'"
+        browserController.webView?.evaluateJavaScript(script, completionHandler: nil)
     }
 
     private var browsingHistorySheet: some View {
@@ -882,8 +971,15 @@ struct ContentView: View {
         let normalized = raw.contains("://") ? raw : "https://" + raw
         if !hasWhitespace, let url = URL(string: normalized),
            let host = url.host, host.contains("."), !host.hasPrefix(".") {
-            browserAddress = url.absoluteString
-            browserController.load(url)
+            var targetURL = url
+            if browserDesktopMode && browserStripMobilePrefix,
+               let host = url.host, host.lowercased().hasPrefix("m."),
+               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                components.host = String(host.dropFirst(2))
+                if let stripped = components.url { targetURL = stripped }
+            }
+            browserAddress = targetURL.absoluteString
+            browserController.load(targetURL)
             return
         }
         let query = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? raw
