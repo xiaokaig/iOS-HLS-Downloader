@@ -84,7 +84,7 @@ final class HLSDownloadManager: ObservableObject {
 
         let hasMap = mediaPlaylist.segments.contains { $0.map != nil }
         let ext = hasMap ? "mp4" : "ts"
-        let filename = "HLS-\(Int(Date().timeIntervalSince1970)).\(ext)"
+        let filename = "HLS-\(UUID().uuidString.prefix(8)).\(ext)"
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let destination = documents.appendingPathComponent(filename)
         try? FileManager.default.removeItem(at: destination)
@@ -92,7 +92,11 @@ final class HLSDownloadManager: ObservableObject {
             throw HLSDownloadError.invalidResponse
         }
         let output = try FileHandle(forWritingTo: destination)
-        defer { try? output.close() }
+        var preserveDestination = false
+        defer {
+            try? output.close()
+            if !preserveDestination { try? FileManager.default.removeItem(at: destination) }
+        }
 
         let total = mediaPlaylist.segments.count
         let taskDirectory = persistentTaskDirectory(for: playlistURL)
@@ -237,6 +241,7 @@ final class HLSDownloadManager: ObservableObject {
             }
         }
         outputURL = finalURL
+        preserveDestination = true
         try? FileManager.default.removeItem(at: taskDirectory)
         if finalURL.pathExtension.lowercased() == "mp4" {
             status = "下载完成（MP4）"
