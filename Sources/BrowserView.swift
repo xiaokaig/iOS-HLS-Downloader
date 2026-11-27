@@ -328,7 +328,7 @@ struct BrowserView: UIViewRepresentable {
         try {
           const raw = value && value.url ? value.url : value;
           const url = new URL(String(raw), location.href);
-          if (!/^https?:$/.test(url.protocol) || (!extensions.test(url.href) && !/^video\//i.test(mime))) return;
+          if (!/^https?:$/.test(url.protocol) || (!extensions.test(url.href) && !/^(?:video\/(?:mp4|quicktime|webm|x-m4v|x-msvideo|x-matroska))$/i.test(mime))) return;
           if (/\.(?:ts|m4s)(?:[?#]|$)/i.test(url.href)) return;
           if (seen.has(url.href)) return;
           seen.add(url.href);
@@ -592,7 +592,7 @@ struct BrowserView: UIViewRepresentable {
                 let mime = navigationResponse.response.mimeType ?? "未知"
                 let responseURL = navigationResponse.response.url
                 AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(mime) url=\(AppDiagnostics.safeURL(responseURL))")
-                if isVideoSniffingEnabled, mime.lowercased().hasPrefix("video/"), let responseURL {
+                if isVideoSniffingEnabled, ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v", "video/x-msvideo", "video/x-matroska"].contains(mime.lowercased()), let responseURL {
                     capture(responseURL, isDirectVideo: true)
                 }
             }
