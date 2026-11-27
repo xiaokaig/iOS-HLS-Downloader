@@ -95,6 +95,7 @@ final class DownloadQueueManager: ObservableObject {
     func pause(_ item: DownloadQueueItem) {
         guard item.state == .downloading else { return }
         item.state = .paused
+        item.status = "已暂停"
         if let direct = item.directManager {
             direct.pause()
             activeIDs.remove(item.id)
@@ -107,6 +108,7 @@ final class DownloadQueueManager: ObservableObject {
     func resume(_ item: DownloadQueueItem) {
         guard item.state == .paused else { return }
         item.state = .queued
+        item.status = "等待继续"
         pump()
     }
 
@@ -159,7 +161,13 @@ final class DownloadQueueManager: ObservableObject {
                     let output = try await hls.start(url: url, cookies: cookies)
                     self?.finish(item, output: output)
                 } catch {
-                    self?.finishWithError(item, error: error)
+                    if error is CancellationError || Task.isCancelled {
+                        self?.activeIDs.remove(item.id)
+                        if item.state == .paused { item.status = "已暂停" }
+                        self?.pump()
+                    } else {
+                        self?.finishWithError(item, error: error)
+                    }
                 }
             }
         } else if let direct = item.directManager, case .direct(let url, let cookies, let referrer) = item.kind {
