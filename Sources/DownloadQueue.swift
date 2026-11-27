@@ -191,7 +191,7 @@ final class DownloadQueueManager: ObservableObject {
     private func pump() {
         guard !backgroundExpired else { return }
         while activeIDs.count < maximumConcurrent,
-              let next = items.first(where: { $0.state == .queued && !activeIDs.contains($0.id) && !activeURLs.contains($0.sourceURL.absoluteString) }) {
+              let next = items.reversed().first(where: { $0.state == .queued && !activeIDs.contains($0.id) && !activeURLs.contains($0.sourceURL.absoluteString) }) {
             start(next)
         }
         objectWillChange.send()
