@@ -91,7 +91,7 @@ struct ContentView: View {
                 .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.18)))
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
                 ZStack {
-                    BrowserView(address: browserAddress, controller: browserController, isSniffingEnabled: hlsSniffingEnabled, onCapture: addCandidate,
+                    BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate, isSniffingEnabled: hlsSniffingEnabled,
                                 onAddressChange: { browserAddress = $0 })
                     if browserAddress == "https://" || browserAddress.isEmpty {
                         VStack(spacing: 24) {
