@@ -7,6 +7,7 @@ struct ContentView: View {
     @StateObject private var downloader = HLSDownloadManager()
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
+    @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
     @State private var showingBrowserCandidates = false
 
     // Browser
@@ -90,7 +91,7 @@ struct ContentView: View {
                 .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.18)))
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
                 ZStack {
-                    BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
+                    BrowserView(address: browserAddress, controller: browserController, isSniffingEnabled: hlsSniffingEnabled, onCapture: addCandidate,
                                 onAddressChange: { browserAddress = $0 })
                     if browserAddress == "https://" || browserAddress.isEmpty {
                         VStack(spacing: 24) {
@@ -383,6 +384,12 @@ struct ContentView: View {
     private var settingsTab: some View {
         NavigationStack {
             List {
+                Section("浏览器设置") {
+                    Toggle("HLS 视频嗅探", isOn: $hlsSniffingEnabled)
+                    Text(hlsSniffingEnabled ? "已开启：浏览网页时自动检测 HLS 视频地址。" : "已关闭：不注入 HLS 嗅探脚本，普通网页仍可正常浏览。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Section("下载设置") {
                     LabeledContent("分片并发", value: "6 路")
                     LabeledContent("失败重试", value: "最多 3 次")
