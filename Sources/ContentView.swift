@@ -1085,7 +1085,7 @@ struct ContentView: View {
         guard !candidates.contains(where: { candidateKey($0) == key }) else { return }
         candidates.insert(url, at: 0)
         let ext = url.pathExtension.lowercased()
-        let isDirectVideo = isDirectVideoResponse || ["mp4", "m4v", "mov", "webm"].contains(ext)
+        let isDirectVideo = isDirectVideoResponse || ["mp4", "m4v", "mov", "webm", "mkv", "avi"].contains(ext)
         candidateMetadata[key] = isDirectVideo ? "普通视频直链 · 正在获取大小…" : "正在识别播放列表…"
         if candidates.count > 20 {
             let removed = candidates.suffix(from: 20)
