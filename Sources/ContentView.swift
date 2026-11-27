@@ -1411,9 +1411,9 @@ struct ContentView: View {
         )) ?? []
         localFiles = urls.filter { ["mp4", "ts", "m4v", "mov", "webm", "mkv", "avi"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
-        for file in localFiles where !library.history.contains(where: { $0.fileURL == file.absoluteString }) {
-            library.recordDownload(fileURL: file, sourceURL: nil)
-        }
+        // The file manager lists files; download history is recorded only by
+        // completed queue tasks. Do not recreate a history row after the user removes it.
+        library.reconcileDownloadHistory(existingFileURLs: Set(localFiles.map(\.absoluteString)))
     }
 
     private func fileSize(_ url: URL) -> String {
