@@ -427,7 +427,15 @@ struct BrowserView: UIViewRepresentable {
         ]
         let custom = customAdDomains.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { !$0.isEmpty && !$0.contains("/") && !$0.contains(":") && !$0.contains(" ") }
+            .filter { domain in
+                guard !domain.isEmpty, domain.utf8.count <= 253 else { return false }
+                let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+                guard labels.count >= 2 else { return false }
+                return labels.allSatisfy { label in
+                    label.utf8.count <= 63 &&
+                    label.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"#, options: .regularExpression) != nil
+                }
+            }
         let domains = Array(Set(builtIn + custom)).sorted().prefix(1200)
         let signature = domains.joined(separator: "|")
         guard coordinator.adRulesSignature != signature else { return }
@@ -728,10 +736,9 @@ struct BrowserView: UIViewRepresentable {
             let isNewWindow = navigationAction.targetFrame == nil
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
             if isSniffingEnabled, isMainFrame, isHLSPlaylistURL(url) {
-                AppDiagnostics.shared.log("SNIFF", "拦截 HLS 主文档导航并转入嗅探列表 url=\(AppDiagnostics.safeURL(url))")
+                // Sniffing is observational: never cancel a page's own HLS navigation.
+                AppDiagnostics.shared.log("SNIFF", "捕获 HLS 主文档导航（保持网页原生播放） url=\(AppDiagnostics.safeURL(url))")
                 capture(url, isDirectVideo: false)
-                decisionHandler(.cancel)
-                return
             }
             if isVideoSniffingEnabled, isMainFrame,
                ["mp4", "m4v", "mov", "webm", "mkv", "avi"].contains(url.pathExtension.lowercased()) {
@@ -792,10 +799,8 @@ struct BrowserView: UIViewRepresentable {
                 let responseURL = navigationResponse.response.url
                 AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(mime) url=\(AppDiagnostics.safeURL(responseURL))")
                 if isSniffingEnabled, isHLSPlaylistMIME(mime), let responseURL {
-                    AppDiagnostics.shared.log("SNIFF", "主文档响应识别为 HLS mime=\(mime)")
+                    AppDiagnostics.shared.log("SNIFF", "主文档响应识别为 HLS mime=\(mime)（允许网页原生处理）")
                     capture(responseURL, isDirectVideo: false)
-                    decisionHandler(.cancel)
-                    return
                 }
                 if isVideoSniffingEnabled, ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v", "video/x-msvideo", "video/x-matroska"].contains(mime.lowercased()), let responseURL {
                     capture(responseURL, isDirectVideo: true)
