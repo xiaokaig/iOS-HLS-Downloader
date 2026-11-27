@@ -327,6 +327,24 @@ struct BrowserView: UIViewRepresentable {
     let stripMobilePrefix: Bool
     let zoomLevel: Double
 
+    private static let nativeMediaScript = """
+    (() => {
+      if (window.__nativePageMediaReady) return;
+      window.__nativePageMediaReady = true;
+      const prepare = () => document.querySelectorAll('video').forEach(video => {
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
+        video.playsInline = true;
+      });
+      prepare();
+      try {
+        new MutationObserver(prepare).observe(document.documentElement || document, {
+          childList: true, subtree: true
+        });
+      } catch (_) {}
+    })();
+    """
+
     private static let sniffingScript = """
     (() => {
       if (window.__hlsSnifferInstalled) return;
@@ -674,6 +692,7 @@ struct BrowserView: UIViewRepresentable {
             let contentController = existing.configuration.userContentController
             contentController.removeAllUserScripts()
             if isSniffingEnabled {
+                contentController.addUserScript(WKUserScript(source: Self.nativeMediaScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
                 contentController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
             if isVideoSniffingEnabled {
@@ -687,6 +706,7 @@ struct BrowserView: UIViewRepresentable {
         }
         let contentController = WKUserContentController()
         if isSniffingEnabled {
+            contentController.addUserScript(WKUserScript(source: Self.nativeMediaScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             contentController.addUserScript(
                 WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
@@ -767,6 +787,7 @@ struct BrowserView: UIViewRepresentable {
             let contentController = webView.configuration.userContentController
             contentController.removeAllUserScripts()
             if isSniffingEnabled {
+                contentController.addUserScript(WKUserScript(source: Self.nativeMediaScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
                 contentController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
             if isVideoSniffingEnabled {
