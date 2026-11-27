@@ -123,7 +123,7 @@ final class BrowserController: ObservableObject {
 
     func observeProgress(of view: WKWebView) {
         progressObservation?.invalidate()
-        progressObservation = view.observe(\\.estimatedProgress, options: [.initial, .new]) { [weak self] observed, _ in
+        progressObservation = view.observe(\.estimatedProgress, options: [.initial, .new]) { [weak self] observed, _ in
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.estimatedProgress = observed.estimatedProgress
@@ -156,7 +156,7 @@ final class BrowserController: ObservableObject {
 
         requestedKey = key
         navigationStartedAt = Date()
-        estimatedProgress = max(estimatedProgress, 0.03)
+        estimatedProgress = 0.03
         showsNavigationProgress = true
         diagnostic = "阶段：正在加载\n地址：\(url.absoluteString)"
         AppDiagnostics.shared.log("NAV", "用户发起导航 url=\(AppDiagnostics.safeURL(url))")
@@ -204,6 +204,8 @@ final class BrowserController: ObservableObject {
     func rebuildWebView() {
         AppDiagnostics.shared.log("WEBKIT", "用户请求重建 WKWebView")
         webView?.stopLoading()
+        progressObservation?.invalidate()
+        progressObservation = nil
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView = nil
