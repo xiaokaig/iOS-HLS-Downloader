@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
     @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
+    @AppStorage("videoSniffingEnabled") private var videoSniffingEnabled = false
     @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
@@ -104,6 +105,7 @@ struct ContentView: View {
                 ZStack {
                     BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
                                 onAddressChange: { browserAddress = $0 }, isSniffingEnabled: hlsSniffingEnabled,
+                                isVideoSniffingEnabled: videoSniffingEnabled,
                                 isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                                 isPopupBlockingEnabled: popupBlockingEnabled,
                                 customAdDomains: customAdDomains)
@@ -164,14 +166,16 @@ struct ContentView: View {
                                 VStack(alignment: .leading, spacing: 8) {
                                     HStack {
                                         Image(systemName: "film").foregroundStyle(.blue)
-                                        Text(url.lastPathComponent.isEmpty ? "HLS 视频流" : url.lastPathComponent)
+                                        Text(url.lastPathComponent.isEmpty ? "视频流" : url.lastPathComponent)
                                             .font(.subheadline.weight(.semibold)).lineLimit(1)
                                         Spacer()
-                                        Button("解析") {
-                                            showingBrowserCandidates = false
-                                            inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                        if url.pathExtension.lowercased() == "m3u8" {
+                                            Button("解析") {
+                                                showingBrowserCandidates = false
+                                                inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                            }
+                                            .buttonStyle(.borderedProminent).controlSize(.small)
                                         }
-                                        .buttonStyle(.borderedProminent).controlSize(.small)
                                     }
                                     Text(url.host ?? url.absoluteString).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                                     Text(candidateMetadata[candidateKey(url)] ?? "正在识别播放列表…")
@@ -407,6 +411,9 @@ struct ContentView: View {
             List {
                 Section("浏览器设置") {
                     Toggle("HLS 视频嗅探", isOn: $hlsSniffingEnabled)
+                    Toggle("普通视频嗅探（MP4 等）", isOn: $videoSniffingEnabled)
+                    Text(videoSniffingEnabled ? "已开启：识别 MP4、M4V、MOV、WebM 直链及 video/* 响应。" : "已关闭：不检测普通视频直链，不影响 HLS 嗅探。")
+                        .font(.caption).foregroundStyle(.secondary)
                     Text(hlsSniffingEnabled ? "已开启：浏览网页时自动检测 HLS 视频地址。" : "已关闭：不注入 HLS 嗅探脚本，普通网页仍可正常浏览。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -553,7 +560,9 @@ struct ContentView: View {
         candidateCookies[key] = cookies
         guard !candidates.contains(where: { candidateKey($0) == key }) else { return }
         candidates.insert(url, at: 0)
-        candidateMetadata[key] = "正在识别播放列表…"
+        let ext = url.pathExtension.lowercased()
+        let isDirectVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
+        candidateMetadata[key] = isDirectVideo ? "普通视频直链 · 可复制地址" : "正在识别播放列表…"
         if candidates.count > 20 {
             let removed = candidates.suffix(from: 20)
             for item in removed {
@@ -563,6 +572,8 @@ struct ContentView: View {
             }
             candidates = Array(candidates.prefix(20))
         }
+
+        guard !isDirectVideo else { return }
 
         Task {
             do {
