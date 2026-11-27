@@ -93,6 +93,7 @@ struct ContentView: View {
                 ZStack {
                     BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
                                 onAddressChange: { browserAddress = $0 }, isSniffingEnabled: hlsSniffingEnabled)
+                        .id(browserController.webViewID)
                     if browserAddress == "https://" || browserAddress.isEmpty {
                         VStack(spacing: 24) {
                             Spacer()
@@ -389,6 +390,22 @@ struct ContentView: View {
                     Text(hlsSniffingEnabled ? "已开启：浏览网页时自动检测 HLS 视频地址。" : "已关闭：不注入 HLS 嗅探脚本，普通网页仍可正常浏览。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                }
+                Section("浏览器诊断") {
+                    Text(browserController.diagnostic)
+                        .font(.caption.monospaced())
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        UIPasteboard.general.string = browserController.diagnostic
+                    } label: {
+                        Label("复制诊断信息", systemImage: "doc.on.doc")
+                    }
+                    Button {
+                        browserController.rebuildWebView()
+                    } label: {
+                        Label("重建浏览器", systemImage: "arrow.clockwise")
+                    }
                 }
                 Section("下载设置") {
                     LabeledContent("分片并发", value: "6 路")
