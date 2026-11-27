@@ -152,17 +152,13 @@ final class DownloadQueueManager: ObservableObject {
 
     func cancel(_ item: DownloadQueueItem) {
         guard item.state == .downloading || item.state == .queued || item.state == .paused else { return }
+        let wasDownloading = item.state == .downloading
         item.state = .cancelled
         item.runner?.cancel()
-        if let hls = item.hlsManager {
-            let runner = item.runner
-            Task {
-                await runner?.value
-                hls.discardResumeCache()
-            }
-        }
         item.directManager?.cancel()
-        activeIDs.remove(item.id)
+        if item.directManager != nil || !wasDownloading {
+            activeIDs.remove(item.id)
+        }
         item.status = "已取消"
         finishBackgroundTaskIfIdle()
         pump()
@@ -191,7 +187,7 @@ final class DownloadQueueManager: ObservableObject {
     private func pump() {
         guard !backgroundExpired else { return }
         while activeIDs.count < maximumConcurrent,
-              let next = items.first(where: { $0.state == .queued }) {
+              let next = items.first(where: { $0.state == .queued && !activeIDs.contains($0.id) }) {
             start(next)
         }
         objectWillChange.send()
