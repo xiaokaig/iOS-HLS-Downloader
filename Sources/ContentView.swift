@@ -86,7 +86,7 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .sheet(isPresented: Binding(
+        .fullScreenCover(isPresented: Binding(
             get: { playingURL != nil },
             set: { if !$0 { playingURL = nil } }
         )) {
@@ -810,7 +810,7 @@ struct ContentView: View {
                                         }
                                         Spacer()
                                         if let url = URL(string: entry.fileURL), FileManager.default.fileExists(atPath: url.path) {
-                                            Button { playingURL = url } label: { Image(systemName: "play.circle").font(.title3) }
+                                            Button { openPlayer(url) } label: { Image(systemName: "play.circle").font(.title3) }
                                             ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
                                         }
                                         Button(role: .destructive) { library.removeHistory(entry.id) } label: {
@@ -1230,6 +1230,12 @@ struct ContentView: View {
             let value = (title?.isEmpty == false ? title! : (url.host ?? url.absoluteString))
             library.addBookmark(url: url, title: value)
         }
+    }
+
+    private func openPlayer(_ url: URL) {
+        guard playingURL == nil else { return }
+        AppDiagnostics.shared.log("PLAYER", "请求打开本地视频 file=\(url.lastPathComponent)")
+        playingURL = url
     }
 
     private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {

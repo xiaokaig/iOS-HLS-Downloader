@@ -198,22 +198,37 @@ final class BrowserController: ObservableObject {
         update(webView)
     }
 
+    private var pendingStartPage = false
+
     func showStartPage() {
         guard let webView else {
-            isShowingStartPage = true
-            diagnostic = "阶段：显示起始页（WebView 尚未创建）"
+            pendingStartPage = true
+            webViewID = UUID()
+            diagnostic = "阶段：正在恢复浏览器"
+            AppDiagnostics.shared.log("NAV", "主页点击时 WebView 不在，触发重建并排队显示起始页")
             return
         }
-        webView.stopLoading()
+        displayStartPage(in: webView)
+    }
+
+    func webViewDidAttach(_ view: WKWebView) {
+        webView = view
+        if pendingStartPage {
+            pendingStartPage = false
+            AppDiagnostics.shared.log("NAV", "WebView 已恢复，执行排队的主页请求")
+            displayStartPage(in: view)
+        }
+    }
+
+    private func displayStartPage(in view: WKWebView) {
         requestedKey = nil
-        isShowingStartPage = true
         navigationStartedAt = Date()
         estimatedProgress = 0.03
         showsNavigationProgress = true
         diagnostic = "阶段：返回起始页"
         AppDiagnostics.shared.log("NAV", "返回应用起始页（复用当前 WKWebView）")
-        webView.loadHTMLString("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body></body></html>", baseURL: nil)
-        update(webView)
+        view.loadHTMLString("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body></body></html>", baseURL: nil)
+        update(view)
     }
 
     func goHome() {
@@ -651,7 +666,7 @@ struct BrowserView: UIViewRepresentable {
         webView.scrollView.refreshControl = refreshControl
 
         context.coordinator.webView = webView
-        controller.webView = webView
+        controller.webViewDidAttach(webView)
         controller.observeProgress(of: webView)
 
         // Initial navigation occurs once, only when a real URL was supplied.
@@ -682,7 +697,7 @@ struct BrowserView: UIViewRepresentable {
             webView.evaluateJavaScript("document.documentElement.style.zoom = '\(zoomLevel)'", completionHandler: nil)
         }
         if controller.webView !== webView {
-            controller.webView = webView
+            controller.webViewDidAttach(webView)
             context.coordinator.webView = webView
         }
 

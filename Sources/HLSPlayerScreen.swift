@@ -7,6 +7,7 @@ struct HLSPlayerScreen: View {
     @State private var deviceOrientation: UIDeviceOrientation = UIDevice.current.orientation
     @State private var interfaceOrientation: UIInterfaceOrientation = .portrait
     @State private var fillScreen = false
+    @State private var player: AVPlayer?
 
     private var directionMismatch: Bool {
         let deviceLandscape = deviceOrientation == .landscapeLeft || deviceOrientation == .landscapeRight
@@ -23,7 +24,7 @@ struct HLSPlayerScreen: View {
                 if ["ts", "mkv", "avi", "webm"].contains(url.pathExtension.lowercased()) {
                     VLCPlayerView(url: url)
                 } else {
-                    VideoPlayer(player: AVPlayer(url: url))
+                    VideoPlayer(player: player)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -57,8 +58,18 @@ struct HLSPlayerScreen: View {
         .onAppear {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
             updateInterfaceOrientation()
+            if !["ts", "mkv", "avi", "webm"].contains(url.pathExtension.lowercased()) {
+                let item = AVPlayerItem(url: url)
+                let newPlayer = AVPlayer(playerItem: item)
+                player = newPlayer
+                DispatchQueue.main.async { newPlayer.play() }
+            }
         }
-        .onDisappear { UIDevice.current.endGeneratingDeviceOrientationNotifications() }
+        .onDisappear {
+            player?.pause()
+            player = nil
+            UIDevice.current.endGeneratingDeviceOrientationNotifications()
+        }
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             deviceOrientation = UIDevice.current.orientation
             updateInterfaceOrientation()
