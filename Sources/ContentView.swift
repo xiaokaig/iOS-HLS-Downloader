@@ -163,7 +163,7 @@ struct ContentView: View {
                                         Spacer()
                                         Button("解析") {
                                             showingBrowserCandidates = false
-                                            inspect(url, cookies: candidateCookies[url.absoluteString] ?? [])
+                                            inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
                                         }
                                         .buttonStyle(.borderedProminent).controlSize(.small)
                                     }
