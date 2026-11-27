@@ -4,6 +4,7 @@ import UIKit
 
 struct HLSPlayerScreen: View {
     let url: URL
+    let onClose: () -> Void
     @State private var deviceOrientation: UIDeviceOrientation = UIDevice.current.orientation
     @State private var interfaceOrientation: UIInterfaceOrientation = .portrait
     @State private var fillScreen = false
@@ -30,6 +31,18 @@ struct HLSPlayerScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scaleEffect(fillScreen ? 1.16 : 1)
             .clipped()
+            .overlay(alignment: .topLeading) {
+                Button(action: onClose) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(.ultraThinMaterial, in: Circle())
+                }
+                .padding(.leading, 18)
+                .padding(.top, 54)
+                .accessibilityLabel("关闭播放器")
+            }
             .overlay(alignment: .topTrailing) {
                 if directionMismatch {
                     Button(action: rotateToDevice) {
