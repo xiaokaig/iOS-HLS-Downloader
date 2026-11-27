@@ -73,7 +73,7 @@ struct BrowserView: UIViewRepresentable {
           new MutationObserver(scan).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
           scan();
         })();
-   
+        """
 
     func makeCoordinator() -> Coordinator { Coordinator(controller: controller, onCapture: onCapture, onAddressChange: onAddressChange, isSniffingEnabled: isSniffingEnabled) }
 
