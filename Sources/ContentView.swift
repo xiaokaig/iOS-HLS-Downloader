@@ -9,6 +9,9 @@ struct ContentView: View {
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
     @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
+    @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
+    @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
+    @AppStorage("customAdDomains") private var customAdDomains = ""
     @State private var showingBrowserCandidates = false
 
     // Browser
@@ -100,7 +103,10 @@ struct ContentView: View {
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
                 ZStack {
                     BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
-                                onAddressChange: { browserAddress = $0 }, isSniffingEnabled: hlsSniffingEnabled)
+                                onAddressChange: { browserAddress = $0 }, isSniffingEnabled: hlsSniffingEnabled,
+                                isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
+                                isPopupBlockingEnabled: popupBlockingEnabled,
+                                customAdDomains: customAdDomains)
                         .id(browserController.webViewID)
                     if browserAddress == "https://" || browserAddress.isEmpty {
                         VStack(spacing: 24) {
@@ -404,6 +410,28 @@ struct ContentView: View {
                     Text(hlsSniffingEnabled ? "已开启：浏览网页时自动检测 HLS 视频地址。" : "已关闭：不注入 HLS 嗅探脚本，普通网页仍可正常浏览。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    Toggle("广告页面跳转拦截", isOn: $adRedirectBlockingEnabled)
+                    Text("拦截内置广告域名及自定义域名的顶层页面跳转，不拦截普通网页资源请求。默认关闭。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    Toggle("弹窗 / 新窗口拦截", isOn: $popupBlockingEnabled)
+                    Text("阻止网页通过 window.open 或新窗口链接打开页面。默认关闭。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Section("广告域名规则") {
+                    Text("内置规则包含常见广告跳转域名。可在下面逐行添加域名，仅拦截该域名及其子域名。不要填写 https:// 或路径。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextEditor(text: $customAdDomains)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(minHeight: 110)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    HStack {
+                        Text("每行一个域名")
+                            .font(.caption).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("清空自定义规则", role: .destructive) { customAdDomains = "" }
+                            .font(.caption)
+                    }
                 }
                 Section("当前加载状态") {
                     Text(browserController.diagnostic)
