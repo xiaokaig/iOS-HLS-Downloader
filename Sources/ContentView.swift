@@ -6,9 +6,9 @@ import UIKit
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var downloader = HLSDownloadManager()
-    @StateObject private var directDownloader = DirectVideoDownloadManager()
     @StateObject private var library = BrowserLibraryStore()
     @StateObject private var tabManager = BrowserTabManager()
+    @StateObject private var downloadQueue = DownloadQueueManager()
     private var browserController: BrowserController { tabManager.activeController }
     @State private var showingBrowserMenu = false
     @State private var showingDownloads = false
@@ -54,13 +54,16 @@ struct ContentView: View {
     // Local files
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
-    @State private var directDownloadSourceURL: URL?
 
     var body: some View {
         browserTab
         .tint(.blue)
         .onAppear {
             refreshFiles()
+            downloadQueue.onCompleted = { url, sourceURL in
+                library.recordDownload(fileURL: url, sourceURL: sourceURL)
+                refreshFiles()
+            }
             browserAddress = tabManager.activeTab.url
             AppDiagnostics.shared.log("APP", "ContentView appeared")
         }
@@ -69,12 +72,6 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { phase in
             AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
-        }
-        .onChange(of: directDownloader.outputURL) { url in
-            guard let url else { return }
-            library.recordDownload(fileURL: url, sourceURL: directDownloadSourceURL)
-            directDownloadSourceURL = nil
-            refreshFiles()
         }
         .sheet(isPresented: $showingVariants) {
             variantPicker
@@ -580,12 +577,10 @@ struct ContentView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("直接下载")
-                            .font(.title2.bold())
-                        Text("粘贴 M3U8 地址，无需先打开网页。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("添加下载").font(.title2.bold())
+                        Text("粘贴 M3U8 地址解析清晰度，也可以从网页嗅探结果直接加入队列。")
+                            .font(.subheadline).foregroundStyle(.secondary)
                         HStack(spacing: 8) {
                             TextField("https://example.com/video.m3u8", text: $directURL, axis: .vertical)
                                 .textInputAutocapitalization(.never)
@@ -596,107 +591,78 @@ struct ContentView: View {
                                 .background(Color(uiColor: .secondarySystemBackground))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             Button {
-                                if let value = UIPasteboard.general.string {
-                                    directURL = value
-                                }
+                                if let value = UIPasteboard.general.string { directURL = value }
                             } label: {
-                                Image(systemName: "doc.on.clipboard")
-                                    .font(.title3)
-                                    .frame(width: 42, height: 46)
-                            }
-                            .buttonStyle(.bordered)
+                                Image(systemName: "doc.on.clipboard").font(.title3).frame(width: 42, height: 46)
+                            }.buttonStyle(.bordered)
                         }
                         Button(action: parseDirectURL) {
                             if isInspecting { ProgressView().frame(maxWidth: .infinity) }
-                            else { Label("解析地址", systemImage: "text.magnifyingglass").frame(maxWidth: .infinity) }
+                            else { Label("解析 M3U8 地址", systemImage: "text.magnifyingglass").frame(maxWidth: .infinity) }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInspecting || downloader.isDownloading || directDownloader.isDownloading)
+                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInspecting)
                     }
                     .padding()
-                    .background(.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
+                    .background(.background, in: RoundedRectangle(cornerRadius: 18))
                     .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(uiColor: .separator).opacity(0.25)))
 
-                    VStack(alignment: .leading, spacing: 14) {
-                        HStack {
-                            Text("当前任务")
-                                .font(.title3.bold())
-                            Spacer()
-                            if downloader.isDownloading {
-                                Label("进行中", systemImage: "arrow.down.circle.fill")
-                                    .font(.caption.weight(.medium))
-                                    .foregroundStyle(.blue)
-                            }
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("下载队列").font(.title3.bold())
+                            Text("最多同时下载 3 个任务，其余自动排队")
+                                .font(.caption).foregroundStyle(.secondary)
                         }
-                        HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: downloader.isDownloading || directDownloader.isDownloading ? "arrow.down.doc.fill" : "doc")
-                                .font(.title2)
-                                .foregroundStyle(.blue)
-                                .frame(width: 44, height: 44)
-                                .background(Color.blue.opacity(0.10))
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(directDownloader.isDownloading || directDownloader.outputURL != nil
-                                     ? directDownloader.status : downloader.status)
-                                    .font(.headline)
-                                if directDownloader.isDownloading {
-                                    ProgressView(value: directDownloader.progress)
-                                    Text(directDownloader.progress, format: .percent.precision(.fractionLength(0)))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                } else if downloader.isDownloading {
-                                    ProgressView(value: downloader.progress)
-                                    Text(downloader.progress, format: .percent.precision(.fractionLength(0)))
-                                        .font(.caption.monospacedDigit())
-                                        .foregroundStyle(.secondary)
-                                } else if let output = downloader.outputURL {
-                                    Text(output.lastPathComponent)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                } else {
-                                    Text("尚无下载任务")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                        Spacer()
+                        Text("\(downloadQueue.activeCount) 进行中 · \(downloadQueue.queuedCount) 排队")
+                            .font(.caption.weight(.medium)).foregroundStyle(.blue)
+                    }
+
+                    if downloadQueue.items.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "arrow.down.circle").font(.system(size: 38)).foregroundStyle(.tertiary)
+                            Text("队列为空").font(.headline)
+                            Text("从网页嗅探视频，或粘贴 M3U8 地址开始下载。")
+                                .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        }
+                        .frame(maxWidth: .infinity).padding(.vertical, 28)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+                    } else {
+                        VStack(spacing: 0) {
+                            ForEach(downloadQueue.items) { item in
+                                DownloadQueueRow(
+                                    item: item,
+                                    onPause: { downloadQueue.pause(item) },
+                                    onResume: { downloadQueue.resume(item) },
+                                    onCancel: { downloadQueue.cancel(item) },
+                                    onRetry: { downloadQueue.retry(item) },
+                                    onRemove: { downloadQueue.remove(item) }
+                                )
+                                if item.id != downloadQueue.items.last?.id {
+                                    Divider()
                                 }
                             }
-                            Spacer(minLength: 0)
                         }
-                        if let warning = downloader.conversionWarning {
-                            Label(warning, systemImage: "exclamationmark.triangle.fill")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                                .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .background(.background, in: RoundedRectangle(cornerRadius: 16))
+                        Button("清理已完成 / 失败 / 已取消记录") {
+                            downloadQueue.clearFinished()
                         }
-                        if let output = directDownloader.outputURL {
-                            ShareLink(item: output) {
-                                Label("分享 / 导出视频", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        } else if let output = downloader.outputURL {
-                            ShareLink(item: output) {
-                                Label("分享 / 导出视频", systemImage: "square.and.arrow.up")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding()
-                    .background(.background)
-                    .clipShape(RoundedRectangle(cornerRadius: 18))
-                    .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(uiColor: .separator).opacity(0.25)))
-
-                    Label("提示：当前版本一次处理一个下载任务；后台自动恢复和暂停/继续功能尚未接入。", systemImage: "info.circle")
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 4)
+                        .disabled(!downloadQueue.items.contains { [.completed, .failed, .cancelled].contains($0.state) })
+                    }
+
+                    if let warning = downloader.conversionWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption).foregroundStyle(.orange)
+                    }
+                    Label("HLS 暂停后会保留已下载分片，继续时从缓存恢复；普通视频支持暂停 / 继续。iOS 后台执行仍受系统调度限制。", systemImage: "info.circle")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding()
             }
             .background(Color(uiColor: .systemGroupedBackground))
-            .navigationTitle("下载")
+            .navigationTitle("下载管理")
             .navigationBarTitleDisplayMode(.inline)
         }
     }
@@ -940,7 +906,7 @@ struct ContentView: View {
                 Button(action: startPendingDownload) {
                     Label("开始下载", systemImage: "arrow.down.to.line").frame(maxWidth: .infinity)
                 }.buttonStyle(.borderedProminent).padding()
-                    .disabled(downloader.isDownloading || directDownloader.isDownloading || (!parsedIsEndList && variants.isEmpty))
+                    .disabled(!parsedIsEndList && variants.isEmpty)
                     .background(.regularMaterial)
             }
             .navigationTitle("视频信息")
@@ -1067,13 +1033,8 @@ struct ContentView: View {
     }
 
     private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {
-        guard !downloader.isDownloading, !directDownloader.isDownloading else {
-            errorMessage = "当前已有下载任务，请完成后再开始。"
-            return
-        }
-        directDownloadSourceURL = url
-        directDownloader.start(url: url, cookies: cookies, referrer: currentPageURL)
-        showingBrowserMenu = true
+        downloadQueue.enqueueDirect(url, cookies: cookies, referrer: currentPageURL)
+        showingDownloads = true
     }
 
     private func formattedFileDate(_ url: URL) -> String {
@@ -1245,17 +1206,8 @@ struct ContentView: View {
     }
 
     private func startDownload(_ url: URL, cookies: [HTTPCookie]) {
-        Task {
-            do {
-                let output = try await downloader.start(url: url, cookies: cookies)
-                await MainActor.run {
-                    library.recordDownload(fileURL: output, sourceURL: url)
-                    refreshFiles()
-                }
-            } catch {
-                await MainActor.run { errorMessage = error.localizedDescription }
-            }
-        }
+        downloadQueue.enqueueHLS(url, cookies: cookies)
+        showingDownloads = true
     }
 
     private func refreshFiles() {
