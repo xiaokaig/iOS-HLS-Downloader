@@ -4,6 +4,7 @@ import WebKit
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var downloader = HLSDownloadManager()
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
@@ -51,7 +52,13 @@ struct ContentView: View {
                 .tag(3)
         }
         .tint(.blue)
-        .onAppear(perform: refreshFiles)
+        .onAppear {
+            refreshFiles()
+            AppDiagnostics.shared.log("APP", "ContentView appeared")
+        }
+        .onChange(of: scenePhase) { _, phase in
+            AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
+        }
         .sheet(isPresented: $showingVariants) {
             variantPicker
                 .presentationDetents([.medium, .large])
@@ -391,21 +398,39 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                Section("浏览器诊断") {
+                Section("当前加载状态") {
                     Text(browserController.diagnostic)
                         .font(.caption.monospaced())
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     Button {
-                        UIPasteboard.general.string = browserController.diagnostic
-                    } label: {
-                        Label("复制诊断信息", systemImage: "doc.on.doc")
-                    }
-                    Button {
                         browserController.rebuildWebView()
                     } label: {
                         Label("重建浏览器", systemImage: "arrow.clockwise")
                     }
+                }
+                Section("完整诊断日志") {
+                    Text(AppDiagnostics.shared.recentText)
+                        .font(.system(size: 10, design: .monospaced))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .lineLimit(300)
+                    Button {
+                        UIPasteboard.general.string = AppDiagnostics.shared.copyAll()
+                    } label: {
+                        Label("复制完整日志", systemImage: "doc.on.doc")
+                    }
+                    ShareLink(item: AppDiagnostics.shared.exportURL()) {
+                        Label("导出日志文件", systemImage: "square.and.arrow.up")
+                    }
+                    Button {
+                        AppDiagnostics.shared.refresh()
+                    } label: {
+                        Label("刷新日志", systemImage: "arrow.clockwise")
+                    }
+                    Text("从应用启动开始记录，最多约 2MB；敏感认证字段会脱敏。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("下载设置") {
                     LabeledContent("分片并发", value: "6 路")
