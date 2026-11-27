@@ -322,7 +322,6 @@ struct ContentView: View {
                 Section("下载器") {
                     ForEach(orderedMenuItems(browserMenuDownloadOrder, defaults: ["downloads", "files"]), id: \.self) { item in
                         browserMenuRow(item)
-                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
                     .onMove { source, destination in
                         moveMenuItems(source, to: destination, raw: browserMenuDownloadOrder, defaults: ["downloads", "files"]) {
@@ -370,7 +369,7 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button(menuEditMode == .active ? "完成排序" : "长按排序") {
+                    Button(menuEditMode == .active ? "完成排序" : "开始排序") {
                         menuEditMode = menuEditMode == .active ? .inactive : .active
                     }
                 }
@@ -1240,7 +1239,6 @@ struct ContentView: View {
             guard !raw.isEmpty else {
                 browserAddress = ""
                 tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
-                browserController.rebuildWebView()
                 return
             }
             let normalized = raw.contains("://") ? raw : "https://" + raw
@@ -1254,7 +1252,6 @@ struct ContentView: View {
         } else {
             browserAddress = ""
             tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
-            browserController.rebuildWebView()
         }
     }
 
