@@ -580,7 +580,7 @@ struct BrowserView: UIViewRepresentable {
             }
             let rules: [[String: Any]] = subset.map { domain in
                 return [
-                    "trigger": ["url-filter": ".*", "if-domain": [domain, "*" + domain]],
+                    "trigger": ["url-filter": ".*", "if-domain": [domain, "*." + domain]],
                     "action": ["type": "block"]
                 ]
             }
