@@ -51,6 +51,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Verify compiled app icon
+        run: |
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/HLSDownloader.app"
+          test -s "$APP_PATH/Assets.car"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP_PATH/Info.plist" | grep -qx 'AppIcon'
+
       - name: Package unsigned IPA
         run: |
           APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/HLSDownloader.app"
