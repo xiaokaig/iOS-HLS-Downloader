@@ -138,6 +138,16 @@ struct ContentView: View {
                 .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.2)))
                 .padding(.horizontal, 14).padding(.vertical, 8)
 
+                if browserController.showsNavigationProgress {
+                    ProgressView(value: browserController.estimatedProgress)
+                        .progressViewStyle(.linear)
+                        .tint(.blue)
+                        .frame(height: 2)
+                        .padding(.horizontal, 14)
+                        .padding(.top, -5)
+                        .padding(.bottom, 3)
+                }
+
                 ZStack {
                     BrowserView(
                         address: browserAddress,
