@@ -109,7 +109,10 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索或输入网址", text: $browserAddress)
+                    TextField("搜索或输入网址", text: Binding(
+                        get: { addressBarDisplayValue },
+                        set: { browserAddress = $0 }
+                    ))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -158,7 +161,9 @@ struct ContentView: View {
                         isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                         isPopupBlockingEnabled: popupBlockingEnabled,
                         customAdDomains: customAdDomains + "\n" + subscribedAdDomains,
-                        isDesktopMode: browserDesktopMode
+                        isDesktopMode: browserDesktopMode,
+                        stripMobilePrefix: browserStripMobilePrefix,
+                        zoomLevel: browserZoomLevel
                     )
                     .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
 
@@ -1154,6 +1159,12 @@ struct ContentView: View {
             if leftSize != rightSize { return leftSize > rightSize }
             return left.absoluteString < right.absoluteString
         }
+    }
+
+    private var addressBarDisplayValue: String {
+        if browserAddress.hasPrefix("https://") { return String(browserAddress.dropFirst(8)) }
+        if browserAddress.hasPrefix("http://") { return String(browserAddress.dropFirst(7)) }
+        return browserAddress
     }
 
     private var currentPageURL: URL? {
