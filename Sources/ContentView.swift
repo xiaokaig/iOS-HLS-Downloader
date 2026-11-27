@@ -1389,7 +1389,7 @@ struct ContentView: View {
             includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        localFiles = urls.filter { ["mp4", "ts", "m4v", "mov", "webm"].contains($0.pathExtension.lowercased()) }
+        localFiles = urls.filter { ["mp4", "ts", "m4v", "mov", "webm", "mkv", "avi"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
         for file in localFiles where !library.history.contains(where: { $0.fileURL == file.absoluteString }) {
             library.recordDownload(fileURL: file, sourceURL: nil)
