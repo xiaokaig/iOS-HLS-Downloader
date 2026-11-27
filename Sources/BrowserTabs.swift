@@ -37,9 +37,10 @@ final class BrowserTabManager: ObservableObject {
             tabs = [first]
             activeTabID = first.id
         } else {
-            tabs = saved.map { BrowserTab(id: $0.id, url: $0.url, title: $0.title, controller: BrowserController()) }
+            let restoredTabs = saved.map { BrowserTab(id: $0.id, url: $0.url, title: $0.title, controller: BrowserController()) }
+            tabs = restoredTabs
             let requested = (UserDefaults.standard.string(forKey: activeKey)).flatMap(UUID.init(uuidString:))
-            activeTabID = tabs.first(where: { $0.id == requested })?.id ?? tabs[0].id
+            activeTabID = restoredTabs.first(where: { $0.id == requested })?.id ?? restoredTabs[0].id
         }
         persist()
     }
