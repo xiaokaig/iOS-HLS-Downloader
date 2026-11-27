@@ -78,6 +78,9 @@ final class DownloadQueueManager: ObservableObject {
 
     @discardableResult
     func enqueueHLS(_ url: URL, cookies: [HTTPCookie] = []) -> DownloadQueueItem {
+        if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
+            return existing
+        }
         let item = DownloadQueueItem(kind: .hls(url, cookies))
         items.insert(item, at: 0)
         pump()
@@ -86,6 +89,9 @@ final class DownloadQueueManager: ObservableObject {
 
     @discardableResult
     func enqueueDirect(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil) -> DownloadQueueItem {
+        if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
+            return existing
+        }
         let item = DownloadQueueItem(kind: .direct(url, cookies, referrer))
         items.insert(item, at: 0)
         pump()
