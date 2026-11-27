@@ -9,6 +9,7 @@ struct ContentView: View {
     @StateObject private var library = BrowserLibraryStore()
     @StateObject private var tabManager = BrowserTabManager()
     @StateObject private var downloadQueue = DownloadQueueManager()
+    @StateObject private var alistUploader = AListUploadManager()
     private var browserController: BrowserController { tabManager.activeController }
     @State private var showingBrowserMenu = false
     @State private var showingDownloads = false
@@ -37,6 +38,9 @@ struct ContentView: View {
     @AppStorage("browserMenuBrowserOrder") private var browserMenuBrowserOrder = "history,bookmarks,sniff,share"
     @AppStorage("browserMenuDisplayOrder") private var browserMenuDisplayOrder = "desktop,strip,zoom"
     @AppStorage("browserMenuActionOrder") private var browserMenuActionOrder = "refresh,copy,settings"
+    @AppStorage("alistBaseURL") private var alistBaseURL = ""
+    @AppStorage("alistUsername") private var alistUsername = ""
+    @AppStorage("alistTargetDirectory") private var alistTargetDirectory = "/"
     @State private var menuEditMode: EditMode = .inactive
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
@@ -61,6 +65,11 @@ struct ContentView: View {
     @State private var isInspecting = false
     @State private var showingVariants = false
     @State private var errorMessage: String?
+    @State private var alistPassword = ""
+    @State private var alistOTPCode = ""
+    @State private var alistSettingsStatus = "尚未测试连接"
+    @State private var isTestingAList = false
+    @State private var uploadedFileURLs = Set<String>()
 
     // Local files
     @State private var localFiles: [URL] = []
@@ -71,6 +80,7 @@ struct ContentView: View {
         .tint(.blue)
         .onAppear {
             refreshFiles()
+            if alistPassword.isEmpty { alistPassword = AListCredentialStore.loadPassword() ?? "" }
             checkAdRulesAutoUpdate()
             downloadQueue.onCompleted = { url, sourceURL in
                 library.recordDownload(fileURL: url, sourceURL: sourceURL)
@@ -874,8 +884,24 @@ struct ContentView: View {
                                     Text("\(fileSize(url)) · \(formattedFileDate(url))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
+                                    if alistUploader.currentFilePath == url.path {
+                                        ProgressView(value: alistUploader.progress)
+                                        Text(alistUploader.status)
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    } else if uploadedFileURLs.contains(url.absoluteString) {
+                                        Label("已上传到 AList", systemImage: "checkmark.circle.fill")
+                                            .font(.caption2).foregroundStyle(.green)
+                                    }
                                 }
                                 Spacer()
+                                Button {
+                                    uploadToAList(url)
+                                } label: {
+                                    Image(systemName: alistUploader.currentFilePath == url.path ? "arrow.up.circle.fill" : "arrow.up.to.line")
+                                        .font(.title2)
+                                }
+                                .buttonStyle(.plain)
+                                .disabled(alistUploader.isUploading)
                                 Button {
                                     playingURL = url
                                 } label: {
@@ -997,6 +1023,43 @@ struct ContentView: View {
                             adRulesStatus = "已清除订阅规则"
                         }
                     }
+                }
+                Section("AList 上传") {
+                    TextField("AList 地址，例如 https://alist.example.com", text: $alistBaseURL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    TextField("AList 用户名", text: $alistUsername)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    SecureField("AList 密码", text: $alistPassword)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    TextField("二步验证码（如启用）", text: $alistOTPCode)
+                        .keyboardType(.numberPad)
+                    TextField("上传目标目录，例如 /Videos", text: $alistTargetDirectory)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    HStack {
+                        Button {
+                            testAListConnection()
+                        } label: {
+                            if isTestingAList { ProgressView() }
+                            else { Label("测试连接并保存", systemImage: "checkmark.icloud") }
+                        }
+                        .disabled(isTestingAList || alistBaseURL.isEmpty || alistUsername.isEmpty || alistPassword.isEmpty)
+                        Spacer()
+                        Button("清除密码", role: .destructive) {
+                            AListCredentialStore.deletePassword()
+                            alistPassword = ""
+                            alistSettingsStatus = "已清除本机保存的密码"
+                        }
+                        .font(.caption)
+                    }
+                    Text(alistSettingsStatus)
+                        .font(.caption).foregroundStyle(.secondary)
+                    Text("上传使用 AList 原生 PUT /api/fs/put 接口。账号密码仅保存在本机钥匙串；上传时重新登录获取临时 Token。目标目录需事先存在并具有写入权限。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("下载通知") {
                     Button {
@@ -1256,6 +1319,50 @@ struct ContentView: View {
     private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {
         downloadQueue.enqueueDirect(url, cookies: cookies, referrer: currentPageURL)
         showingDownloads = true
+    }
+
+    private func testAListConnection() {
+        isTestingAList = true
+        alistSettingsStatus = "正在连接 AList…"
+        Task {
+            do {
+                try await alistUploader.testConnection(
+                    serverAddress: alistBaseURL,
+                    username: alistUsername,
+                    password: alistPassword,
+                    otpCode: alistOTPCode
+                )
+                try AListCredentialStore.save(password: alistPassword)
+                alistSettingsStatus = "连接成功，账号密码已安全保存"
+            } catch {
+                alistSettingsStatus = "连接失败：\(error.localizedDescription)"
+            }
+            isTestingAList = false
+        }
+    }
+
+    private func uploadToAList(_ fileURL: URL) {
+        let password = alistPassword.isEmpty ? (AListCredentialStore.loadPassword() ?? "") : alistPassword
+        guard !alistBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !alistUsername.isEmpty, !password.isEmpty else {
+            errorMessage = "请先到设置 → AList 上传，填写服务器地址、账号和密码并测试连接。"
+            return
+        }
+        Task {
+            do {
+                try await alistUploader.upload(
+                    fileURL: fileURL,
+                    serverAddress: alistBaseURL,
+                    username: alistUsername,
+                    password: password,
+                    otpCode: alistOTPCode,
+                    targetDirectory: alistTargetDirectory
+                )
+                uploadedFileURLs.insert(fileURL.absoluteString)
+            } catch {
+                errorMessage = "AList 上传失败：\(error.localizedDescription)"
+            }
+        }
     }
 
     private func formattedFileDate(_ url: URL) -> String {
