@@ -337,7 +337,7 @@ struct BrowserView: UIViewRepresentable {
       if (window.__videoSnifferInstalled) return;
       window.__videoSnifferInstalled = true;
       const seen = new Set();
-      const extensions = /\.(?:mp4|m4v|mov|webm)(?:[?#]|$)/i;
+      const extensions = /\.(?:mp4|m4v|mov|webm|mkv|avi)(?:[?#]|$)/i;
       const notify = (value, mime = "") => {
         try {
           const raw = value && value.url ? value.url : value;
