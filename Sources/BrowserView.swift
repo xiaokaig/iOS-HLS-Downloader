@@ -239,7 +239,7 @@ final class BrowserController: ObservableObject {
 struct BrowserView: UIViewRepresentable {
     let address: String
     @ObservedObject var controller: BrowserController
-    let onCapture: (URL, [HTTPCookie]) -> Void
+    let onCapture: (URL, [HTTPCookie], Bool) -> Void
     let onAddressChange: (String) -> Void
     let isSniffingEnabled: Bool
     let isVideoSniffingEnabled: Bool
@@ -424,7 +424,6 @@ struct BrowserView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
-        context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
         context.coordinator.customAdDomains = customAdDomains
@@ -491,7 +490,7 @@ struct BrowserView: UIViewRepresentable {
 
         init(
             controller: BrowserController,
-            onCapture: @escaping (URL, [HTTPCookie]) -> Void,
+            onCapture: @escaping (URL, [HTTPCookie], Bool) -> Void,
             onAddressChange: @escaping (String) -> Void,
             isSniffingEnabled: Bool,
             isVideoSniffingEnabled: Bool,
@@ -531,13 +530,13 @@ struct BrowserView: UIViewRepresentable {
             return false
         }
 
-        private func capture(_ url: URL) {
+        private func capture(_ url: URL, isDirectVideo: Bool) {
             guard let webView else {
-                onCapture(url, [])
+                onCapture(url, [], isDirectVideo)
                 return
             }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                DispatchQueue.main.async { self?.onCapture(url, cookies) }
+                DispatchQueue.main.async { self?.onCapture(url, cookies, isDirectVideo) }
             }
         }
 
@@ -545,7 +544,7 @@ struct BrowserView: UIViewRepresentable {
             guard ["hls", "video"].contains(message.name),
                   let value = message.body as? String,
                   let url = URL(string: value) else { return }
-            capture(url)
+            capture(url, isDirectVideo: message.name == "video")
         }
 
         func webView(
@@ -594,7 +593,7 @@ struct BrowserView: UIViewRepresentable {
                 let responseURL = navigationResponse.response.url
                 AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(mime) url=\(AppDiagnostics.safeURL(responseURL))")
                 if isVideoSniffingEnabled, mime.lowercased().hasPrefix("video/"), let responseURL {
-                    capture(responseURL)
+                    capture(responseURL, isDirectVideo: true)
                 }
             }
             decisionHandler(.allow)
