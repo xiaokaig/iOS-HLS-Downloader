@@ -342,7 +342,6 @@ struct ContentView: View {
                 Section("浏览器") {
                     ForEach(orderedMenuItems(browserMenuBrowserOrder, defaults: ["history", "bookmarks", "sniff", "share"]), id: \.self) { item in
                         browserMenuRow(item)
-                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
                     .onMove { source, destination in
                         moveMenuItems(source, to: destination, raw: browserMenuBrowserOrder, defaults: ["history", "bookmarks", "sniff", "share"]) {
@@ -353,7 +352,6 @@ struct ContentView: View {
                 Section("网页显示") {
                     ForEach(orderedMenuItems(browserMenuDisplayOrder, defaults: ["desktop", "strip", "zoom"]), id: \.self) { item in
                         browserMenuRow(item)
-                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
                     .onMove { source, destination in
                         moveMenuItems(source, to: destination, raw: browserMenuDisplayOrder, defaults: ["desktop", "strip", "zoom"]) {
@@ -364,7 +362,6 @@ struct ContentView: View {
                 Section("页面操作") {
                     ForEach(orderedMenuItems(browserMenuActionOrder, defaults: ["refresh", "copy", "settings"]), id: \.self) { item in
                         browserMenuRow(item)
-                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
                     .onMove { source, destination in
                         moveMenuItems(source, to: destination, raw: browserMenuActionOrder, defaults: ["refresh", "copy", "settings"]) {
