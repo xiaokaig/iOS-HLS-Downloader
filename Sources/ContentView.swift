@@ -177,7 +177,7 @@ struct ContentView: View {
                     )
                     .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
 
-                    if browserAddress.isEmpty && currentPageURL == nil {
+                    if browserController.isShowingStartPage {
                         VStack(spacing: 22) {
                             Spacer()
                             VStack(spacing: 8) {
@@ -1243,6 +1243,7 @@ struct ContentView: View {
     }
 
     private func openHomePage() {
+        AppDiagnostics.shared.log("UI", "主页按钮执行，主页类型=\(browserHomePage)")
         if browserHomePage == "custom" {
             let raw = browserCustomHomeURL.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else {
