@@ -268,8 +268,12 @@ struct ContentView: View {
                                 Spacer()
                                 if url.pathExtension.lowercased() == "m3u8" {
                                     Button("解析") {
+                                        AppDiagnostics.shared.log("UI", "点击解析 HLS 候选 url=\(AppDiagnostics.safeURL(url))")
+                                        let cookies = candidateCookies[candidateKey(url)] ?? []
                                         showingBrowserCandidates = false
-                                        inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                                            inspect(url, cookies: cookies)
+                                        }
                                     }.buttonStyle(.borderedProminent).controlSize(.small)
                                 }
                             }
@@ -277,14 +281,19 @@ struct ContentView: View {
                             Text(candidateMetadata[candidateKey(url)] ?? "正在识别…")
                                 .font(.caption).foregroundStyle(.secondary)
                             HStack {
-                                Button { UIPasteboard.general.string = url.absoluteString } label: {
+                                Button {
+                                    AppDiagnostics.shared.log("UI", "点击复制嗅探地址")
+                                    UIPasteboard.general.string = url.absoluteString
+                                } label: {
                                     Label("复制地址", systemImage: "doc.on.doc")
-                                }
+                                }.buttonStyle(.bordered).controlSize(.small)
                                 if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
                                     Button {
+                                        AppDiagnostics.shared.log("UI", "点击下载普通视频 url=\(AppDiagnostics.safeURL(url))")
                                         showingBrowserCandidates = false
                                         startDirectVideoDownload(url, cookies: candidateCookies[candidateKey(url)] ?? [])
                                     } label: { Label("下载", systemImage: "arrow.down.circle") }
+                                        .buttonStyle(.bordered).controlSize(.small)
                                 }
                             }.font(.caption)
                         }.padding(.vertical, 5)
@@ -537,7 +546,15 @@ struct ContentView: View {
     }
 
     private func menuAction(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Label(title, systemImage: icon) }
+        Button {
+            AppDiagnostics.shared.log("UI", "点击菜单：\(title)")
+            action()
+        } label: {
+            Label(title, systemImage: icon)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func applyBrowserZoom() {
@@ -642,13 +659,18 @@ struct ContentView: View {
     }
 
     private func browserTool(_ symbol: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+        Button {
+            AppDiagnostics.shared.log("UI", "点击底部浏览器按钮：\(symbol)")
+            action()
+        } label: {
             Image(systemName: symbol)
                 .font(.system(size: 19, weight: .medium))
                 .frame(maxWidth: .infinity, minHeight: 48)
                 .contentShape(Rectangle())
         }
-        .foregroundStyle(disabled ? .tertiary : .primary).disabled(disabled)
+        .foregroundStyle(disabled ? .tertiary : .primary)
+        .buttonStyle(.plain)
+        .disabled(disabled)
     }
 
     private func browserLibraryTool(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
@@ -1080,6 +1102,7 @@ struct ContentView: View {
     }
 
     private func addCandidate(_ url: URL, cookies: [HTTPCookie], isDirectVideoResponse: Bool = false) {
+        AppDiagnostics.shared.log("SNIFF", "候选进入列表回调 url=\(AppDiagnostics.safeURL(url)) direct=\(isDirectVideoResponse)")
         let key = candidateKey(url)
         candidateCookies[key] = cookies
         guard !candidates.contains(where: { candidateKey($0) == key }) else { return }
