@@ -1211,7 +1211,9 @@ struct ContentView: View {
     }
 
     private var currentPageURL: URL? {
-        browserController.webView?.url ?? URL(string: browserAddress)
+        let url = browserController.webView?.url ?? URL(string: browserAddress)
+        guard let url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return nil }
+        return url
     }
 
     private var currentPageIsBookmarked: Bool {
@@ -1246,6 +1248,7 @@ struct ContentView: View {
             guard !raw.isEmpty else {
                 browserAddress = ""
                 tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
+                browserController.showStartPage()
                 return
             }
             let normalized = raw.contains("://") ? raw : "https://" + raw
@@ -1259,6 +1262,7 @@ struct ContentView: View {
         } else {
             browserAddress = ""
             tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
+            browserController.showStartPage()
         }
     }
 
