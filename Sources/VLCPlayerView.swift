@@ -1,4 +1,5 @@
 import SwiftUI
+import AVFoundation
 import VLCKit
 
 struct VLCPlayerView: UIViewRepresentable {
@@ -6,6 +7,9 @@ struct VLCPlayerView: UIViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(url: url) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
+        let audioSession = AVAudioSession.sharedInstance()
+        try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
+        try? audioSession.setActive(true)
         context.coordinator.player.drawable = view
         context.coordinator.player.media = VLCMedia(url: url)
         context.coordinator.player.play()
