@@ -68,7 +68,7 @@ enum AListCredentialStore {
 }
 
 @MainActor
-final class AListUploadManager: NSObject, ObservableObject, URLSessionTaskDelegate {
+final class AListUploadManager: NSObject, ObservableObject, URLSessionUploadDelegate {
     @Published private(set) var isUploading = false
     @Published private(set) var progress = 0.0
     @Published private(set) var currentFilePath: String?
