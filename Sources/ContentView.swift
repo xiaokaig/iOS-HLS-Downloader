@@ -169,7 +169,7 @@ struct ContentView: View {
                                         Text(url.lastPathComponent.isEmpty ? "视频流" : url.lastPathComponent)
                                             .font(.subheadline.weight(.semibold)).lineLimit(1)
                                         Spacer()
-                                        if url.pathExtension.lowercased() == "m3u8" {
+                                        if url.pathExtension.lowercased() == "m3u8" && candidateMetadata[candidateKey(url)] != "普通视频直链 · 可复制地址" {
                                             Button("解析") {
                                                 showingBrowserCandidates = false
                                                 inspect(url, cookies: candidateCookies[candidateKey(url)] ?? [])
@@ -555,13 +555,13 @@ struct ContentView: View {
         return components.string ?? url.absoluteString
     }
 
-    private func addCandidate(_ url: URL, cookies: [HTTPCookie]) {
+    private func addCandidate(_ url: URL, cookies: [HTTPCookie], isDirectVideo: Bool = false) {
         let key = candidateKey(url)
         candidateCookies[key] = cookies
         guard !candidates.contains(where: { candidateKey($0) == key }) else { return }
         candidates.insert(url, at: 0)
         let ext = url.pathExtension.lowercased()
-        let isDirectVideo = ["mp4", "m4v", "mov", "webm"].contains(ext)
+        let isDirectVideo = isDirectVideo || ["mp4", "m4v", "mov", "webm"].contains(ext)
         candidateMetadata[key] = isDirectVideo ? "普通视频直链 · 可复制地址" : "正在识别播放列表…"
         if candidates.count > 20 {
             let removed = candidates.suffix(from: 20)
