@@ -7,6 +7,7 @@ struct ContentView: View {
     @StateObject private var downloader = HLSDownloadManager()
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
+    @State private var showingBrowserCandidates = false
 
     // Browser
     @State private var browserAddress = "https://"
@@ -60,14 +61,7 @@ struct ContentView: View {
             set: { if !$0 { playingURL = nil } }
         )) {
             if let url = playingURL {
-                if url.pathExtension.lowercased() == "ts" {
-                    VLCPlayerView(url: url)
-                        .ignoresSafeArea()
-                        .background(.black)
-                } else {
-                    VideoPlayer(player: AVPlayer(url: url))
-                        .ignoresSafeArea()
-                }
+                HLSPlayerScreen(url: url).ignoresSafeArea().background(.black)
             }
         }
         .alert("操作未完成", isPresented: Binding(
@@ -83,97 +77,122 @@ struct ContentView: View {
     private var browserTab: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                HStack(spacing: 8) {
-                    Button { browserController.goBack() } label: { Image(systemName: "chevron.left") }
-                        .disabled(!browserController.canGoBack)
-                    Button { browserController.goForward() } label: { Image(systemName: "chevron.right") }
-                        .disabled(!browserController.canGoForward)
-                    Image(systemName: "lock.fill")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    TextField("输入网址并前往", text: $browserAddress)
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .submitLabel(.go)
-                        .onSubmit(loadBrowserAddress)
-                    Button(action: loadBrowserAddress) {
-                        Image(systemName: "arrow.right.circle.fill").font(.title2)
-                    }
-                    .disabled(browserAddress.trimmingCharacters(in: .whitespaces).isEmpty)
-                    Button { browserController.reload() } label: { Image(systemName: "arrow.clockwise") }
-                    Button { browserController.goHome() } label: { Image(systemName: "house") }
+                HStack(spacing: 10) {
+                    Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                    TextField("搜索或输入网址", text: $browserAddress)
+                        .keyboardType(.URL).textInputAutocapitalization(.never)
+                        .autocorrectionDisabled().submitLabel(.go).onSubmit(loadBrowserAddress)
+                    if browserController.isLoading { ProgressView().controlSize(.small) }
+                    Button(action: loadBrowserAddress) { Image(systemName: "arrow.right").font(.system(size: 16, weight: .semibold)) }
                 }
-                .padding(12)
-                .background(.thinMaterial)
-                .clipShape(RoundedRectangle(cornerRadius: 14))
-                .padding(.horizontal)
-                .padding(.top, 8)
-
-                BrowserView(
-                    address: browserAddress,
-                    controller: browserController,
-                    onCapture: addCandidate,
-                    onAddressChange: { browserAddress = $0 }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if !candidates.isEmpty {
-                    VStack(alignment: .leading, spacing: 10) {
-                        HStack {
-                            Label("发现可下载视频", systemImage: "dot.radiowaves.left.and.right")
-                                .font(.headline)
+                .padding(.horizontal, 15).frame(height: 48)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+                .overlay(Capsule().stroke(Color(uiColor: .separator).opacity(0.18)))
+                .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+                ZStack {
+                    BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
+                                onAddressChange: { browserAddress = $0 })
+                    if browserAddress == "https://" || browserAddress.isEmpty {
+                        VStack(spacing: 24) {
                             Spacer()
-                            Text("\(candidates.count)")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                            Button("清除") {
-                                candidates.removeAll()
-                                candidateCookies.removeAll()
+                            VStack(spacing: 8) {
+                                Image(systemName: "safari").font(.system(size: 42, weight: .light)).foregroundStyle(.blue)
+                                Text("轻装上网").font(.title3.weight(.semibold))
+                                Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
                             }
-                            .font(.caption)
-                        }
-                        ForEach(candidates.prefix(3), id: \.absoluteString) { url in
-                            HStack(spacing: 10) {
-                                Image(systemName: "film")
-                                    .foregroundStyle(.blue)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(url.lastPathComponent.isEmpty ? "HLS 视频流" : url.lastPathComponent)
-                                        .font(.subheadline.weight(.medium))
-                                        .lineLimit(1)
-                                    Text(url.host ?? url.absoluteString)
-                                        .font(.caption2)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                                Spacer()
-                                Button {
-                                    UIPasteboard.general.string = url.absoluteString
-                                } label: {
-                                    Label("复制", systemImage: "doc.on.doc")
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.small)
-                                Button("查看") {
-                                    inspect(url, cookies: candidateCookies[url.absoluteString] ?? [])
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
+                            HStack(spacing: 14) {
+                                browserShortcut("百度", icon: "magnifyingglass", url: "https://www.baidu.com")
+                                browserShortcut("必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com")
+                                browserShortcut("GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
+                                browserShortcut("YouTube", icon: "play.rectangle", url: "https://www.youtube.com")
                             }
+                            Spacer(); Spacer()
                         }
-                        if candidates.count > 3 {
-                            Text("还有 \(candidates.count - 3) 个视频地址")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                        .padding(.horizontal, 20).background(Color(uiColor: .systemBackground))
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                HStack(spacing: 0) {
+                    browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
+                    browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
+                    browserTool("house") { browserAddress = "https://"; browserController.webView?.loadHTMLString("", baseURL: nil) }
+                    Spacer(minLength: 8)
+                    Button { showingBrowserCandidates = true } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: "dot.radiowaves.left.and.right")
+                            Text(candidates.isEmpty ? "嗅探" : "嗅探 \(candidates.count)").font(.caption.weight(.medium))
+                        }
+                        .foregroundStyle(candidates.isEmpty ? .secondary : .blue)
+                        .padding(.horizontal, 12).padding(.vertical, 9)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+                    }
+                    browserTool("arrow.clockwise") { browserController.reload() }
+                    browserTool("square.on.square") { browserController.goHome() }
+                }
+                .padding(.horizontal, 14).padding(.top, 9).padding(.bottom, 5).background(.ultraThinMaterial)
+            }
+            .background(Color(uiColor: .systemBackground)).navigationBarHidden(true)
+            .sheet(isPresented: $showingBrowserCandidates) {
+                NavigationStack {
+                    List {
+                        if candidates.isEmpty {
+                            ContentUnavailableView("暂未发现视频", systemImage: "dot.radiowaves.left.and.right",
+                                description: Text("播放网页中的视频后，检测到 HLS 地址会显示在这里。"))
+                        } else {
+                            ForEach(candidates, id: \.absoluteString) { url in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack {
+                                        Image(systemName: "film").foregroundStyle(.blue)
+                                        Text(url.lastPathComponent.isEmpty ? "HLS 视频流" : url.lastPathComponent)
+                                            .font(.subheadline.weight(.semibold)).lineLimit(1)
+                                        Spacer()
+                                        Button("解析") {
+                                            showingBrowserCandidates = false
+                                            inspect(url, cookies: candidateCookies[url.absoluteString] ?? [])
+                                        }
+                                        .buttonStyle(.borderedProminent).controlSize(.small)
+                                    }
+                                    Text(url.host ?? url.absoluteString).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                    Button { UIPasteboard.general.string = url.absoluteString } label: {
+                                        Label("复制地址", systemImage: "doc.on.doc")
+                                    }.font(.caption)
+                                }.padding(.vertical, 5)
+                            }
                         }
                     }
-                    .padding()
-                    .background(.regularMaterial)
+                    .navigationTitle("视频嗅探").navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) { Button("关闭") { showingBrowserCandidates = false } }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button("清空") { candidates.removeAll(); candidateCookies.removeAll() }.disabled(candidates.isEmpty)
+                        }
+                    }
                 }
+                .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
-            .navigationTitle("浏览器")
-            .navigationBarTitleDisplayMode(.inline)
         }
+    }
+
+    private func browserTool(_ symbol: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(width: 42, height: 38)
+        }
+        .foregroundStyle(disabled ? .tertiary : .primary).disabled(disabled)
+    }
+
+    private func browserShortcut(_ title: String, icon: String, url: String) -> some View {
+        Button {
+            browserAddress = url
+            if let target = URL(string: url) { browserController.load(target) }
+        } label: {
+            VStack(spacing: 8) {
+                Image(systemName: icon).font(.system(size: 21)).foregroundStyle(.primary)
+                    .frame(width: 54, height: 54)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
+                Text(title).font(.caption).foregroundStyle(.secondary)
+            }.frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.plain)
     }
 
     private var downloadsTab: some View {
