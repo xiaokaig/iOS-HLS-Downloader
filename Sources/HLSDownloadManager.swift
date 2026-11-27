@@ -37,6 +37,7 @@ final class HLSDownloadManager: ObservableObject {
     @Published private(set) var conversionWarning: String?
 
     private var keyCache: [URL: Data] = [:]
+    private var lastTaskDirectory: URL?
 
     func inspectPlaylist(_ url: URL, cookies: [HTTPCookie] = []) async throws -> HLSInspection {
         status = "解析播放列表…"
@@ -100,6 +101,7 @@ final class HLSDownloadManager: ObservableObject {
 
         let total = mediaPlaylist.segments.count
         let taskDirectory = persistentTaskDirectory(for: playlistURL)
+        lastTaskDirectory = taskDirectory
         try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
         var signatureLines: [String] = []
         signatureLines.reserveCapacity(mediaPlaylist.segments.count)
@@ -251,6 +253,13 @@ final class HLSDownloadManager: ObservableObject {
             status = "下载完成（TS）"
         }
         return finalURL
+    }
+
+    func discardResumeCache() {
+        if let directory = lastTaskDirectory {
+            try? FileManager.default.removeItem(at: directory)
+            lastTaskDirectory = nil
+        }
     }
 
     private func persistentTaskDirectory(for url: URL) -> URL {
