@@ -620,8 +620,8 @@ struct BrowserView: UIViewRepresentable {
             }
         }
 
-        let batches = stride(from: 0, to: domainList.count, by: 250).map {
-            Array(domainList[$0..<min($0 + 250, domainList.count)])
+        let batches = stride(from: 0, to: domainList.count, by: 1000).map {
+            Array(domainList[$0..<min($0 + 1000, domainList.count)])
         }
         func compileBatch(_ index: Int, accumulated: [WKContentRuleList]) {
             guard coordinator.adRulesSignature == signature else { return }
