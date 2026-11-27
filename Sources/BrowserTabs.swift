@@ -55,7 +55,10 @@ final class BrowserTabManager: ObservableObject {
         let value = url?.absoluteString ?? ""
         let tab = BrowserTab(url: value, title: url?.host ?? "起始页", controller: BrowserController())
         tabs.append(tab)
-        if activate { activeTabID = tab.id }
+        if activate {
+            activeTabID = tab.id
+            releaseOldInactiveWebViews()
+        }
         persist()
         return tab.id
     }
@@ -63,6 +66,7 @@ final class BrowserTabManager: ObservableObject {
     func activate(_ id: UUID) {
         guard tabs.contains(where: { $0.id == id }) else { return }
         activeTabID = id
+        releaseOldInactiveWebViews()
         persist()
     }
 
@@ -94,6 +98,13 @@ final class BrowserTabManager: ObservableObject {
         tabs = tabs.filter { $0.id == id }
         activeTabID = id
         persist()
+    }
+
+    private func releaseOldInactiveWebViews() {
+        let retained = Set(tabs.suffix(5).map(\.id) + [activeTabID])
+        for tab in tabs where !retained.contains(tab.id) {
+            tab.controller.dispose()
+        }
     }
 
     private func persist() {
