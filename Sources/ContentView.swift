@@ -154,26 +154,54 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                HStack(spacing: 0) {
-                    browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
-                    browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
-                    browserTool("house") { browserAddress = ""; browserController.goHome() }
-                    Spacer(minLength: 8)
-                    browserLibraryTool("历史", symbol: "clock.arrow.circlepath") { showingBrowsingHistory = true }
-                    browserLibraryTool("书签", symbol: "bookmark") { showingBookmarks = true }
-                    Button { showingBrowserCandidates = true } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "dot.radiowaves.left.and.right")
-                            Text(candidates.isEmpty ? "嗅探" : "嗅探 \(candidates.count)").font(.caption.weight(.medium))
+                VStack(spacing: 10) {
+                    HStack(spacing: 0) {
+                        browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
+                        browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
+                        browserTool("house") { browserAddress = ""; browserController.goHome() }
+                        Spacer(minLength: 18)
+                        browserTool(browserController.isLoading ? "xmark" : "arrow.clockwise",
+                                    disabled: !browserController.isLoading && browserAddress.isEmpty) {
+                            if browserController.isLoading { browserController.stopLoading() }
+                            else { browserController.reload() }
                         }
-                        .foregroundStyle(candidates.isEmpty ? Color.secondary : Color.blue)
-                        .padding(.horizontal, 12).padding(.vertical, 9)
-                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
                     }
-                    browserTool("arrow.clockwise") { browserController.reload() }
-                    browserTool("xmark", disabled: !browserController.isLoading) { browserController.stopLoading() }
+                    .padding(.horizontal, 4)
+
+                    HStack(spacing: 9) {
+                        browserLibraryTool("历史", symbol: "clock.arrow.circlepath") { showingBrowsingHistory = true }
+                        browserLibraryTool("书签", symbol: "bookmark") { showingBookmarks = true }
+                        Button { showingBrowserCandidates = true } label: {
+                            HStack(spacing: 7) {
+                                Image(systemName: "dot.radiowaves.left.and.right")
+                                    .font(.system(size: 15, weight: .semibold))
+                                Text("嗅探").font(.subheadline.weight(.semibold))
+                                Spacer(minLength: 0)
+                                if !candidates.isEmpty {
+                                    Text("\(candidates.count)")
+                                        .font(.caption2.weight(.bold))
+                                        .monospacedDigit()
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 6).padding(.vertical, 3)
+                                        .background(Color.blue, in: Capsule())
+                                }
+                            }
+                            .foregroundStyle(candidates.isEmpty ? Color.primary : Color.blue)
+                            .padding(.horizontal, 12)
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .background(Color(uiColor: .secondarySystemGroupedBackground),
+                                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        }
+                        .buttonStyle(.plain)
+                    }
                 }
-                .padding(.horizontal, 14).padding(.top, 9).padding(.bottom, 5).background(.ultraThinMaterial)
+                .padding(.horizontal, 16)
+                .padding(.top, 10)
+                .padding(.bottom, 8)
+                .background(.ultraThinMaterial)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(Color(uiColor: .separator).opacity(0.18)).frame(height: 0.5)
+                }
             }
             .background(Color(uiColor: .systemBackground)).navigationBarHidden(true)
             .sheet(isPresented: $showingBrowserCandidates) {
