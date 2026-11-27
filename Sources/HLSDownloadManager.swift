@@ -167,42 +167,53 @@ final class HLSDownloadManager: ObservableObject {
             }
         }
 
-        status = "按顺序组装视频…"
+        status = "后台按顺序组装视频…"
         var lastMap: HLSMap?
         for (index, segment) in mediaPlaylist.segments.enumerated() {
             if let map = segment.map, map != lastMap {
                 let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange, cookies: cookies)
                 defer { try? FileManager.default.removeItem(at: mapTemp.fileURL) }
+                var mapKeyData: Data?
                 if let key = segment.key {
                     guard key.method == "AES-128", key.keyFormat == "identity", key.iv != nil else {
                         throw HLSDownloadError.unsupportedEncryption
                     }
-                    let keyData = try await fetchKey(key, cookies: cookies)
-                    let bytes = try readDownloadedBytes(mapTemp, range: map.byteRange)
-                    let clear = try decryptAES128(bytes, key: keyData, iv: key.iv!)
-                    try output.write(contentsOf: clear)
-                } else {
-                    try appendDownloadedFile(mapTemp, range: map.byteRange, to: output)
+                    mapKeyData = try await fetchKey(key, cookies: cookies)
                 }
+                let mapIV = segment.key?.iv
+                try await Task.detached(priority: .utility) {
+                    if let mapKeyData, let mapIV {
+                        let bytes = try Self.readDownloadedBytes(mapTemp, range: map.byteRange)
+                        let clear = try Self.decryptAES128(bytes, key: mapKeyData, iv: mapIV)
+                        try output.write(contentsOf: clear)
+                    } else {
+                        try Self.appendDownloadedFile(mapTemp, range: map.byteRange, to: output)
+                    }
+                }.value
                 lastMap = map
             }
-
             let cached = cachedSegmentURL(index: index, directory: taskDirectory)
             let statusCode = (try? String(contentsOf: cachedStatusURL(index: index, directory: taskDirectory), encoding: .utf8))
                 .flatMap(Int.init) ?? 200
             let item = (fileURL: cached, statusCode: statusCode)
+            var segmentKeyData: Data?
+            var segmentIV: Data?
             if let key = segment.key {
                 guard key.method == "AES-128", key.keyFormat == "identity", key.url != nil else {
                     throw HLSDownloadError.unsupportedEncryption
                 }
-                let keyData = try await fetchKey(key, cookies: cookies)
-                let iv = key.iv ?? sequenceIV(segment.sequence)
-                let encrypted = try readDownloadedBytes(item, range: segment.byteRange)
-                let clear = try decryptAES128(encrypted, key: keyData, iv: iv)
-                try output.write(contentsOf: clear)
-            } else {
-                try appendDownloadedFile(item, range: segment.byteRange, to: output)
+                segmentKeyData = try await fetchKey(key, cookies: cookies)
+                segmentIV = key.iv ?? Self.sequenceIV(segment.sequence)
             }
+            try await Task.detached(priority: .utility) {
+                if let segmentKeyData, let segmentIV {
+                    let encrypted = try Self.readDownloadedBytes(item, range: segment.byteRange)
+                    let clear = try Self.decryptAES128(encrypted, key: segmentKeyData, iv: segmentIV)
+                    try output.write(contentsOf: clear)
+                } else {
+                    try Self.appendDownloadedFile(item, range: segment.byteRange, to: output)
+                }
+            }.value
             progress = 0.75 + Double(index + 1) / Double(total) * 0.25
         }
 
@@ -336,7 +347,7 @@ final class HLSDownloadManager: ObservableObject {
         return (fileURL, http.statusCode)
     }
 
-    private func appendDownloadedFile(_ item: (fileURL: URL, statusCode: Int), range: HLSByteRange?, to output: FileHandle) throws {
+    nonisolated private static func appendDownloadedFile(_ item: (fileURL: URL, statusCode: Int), range: HLSByteRange?, to output: FileHandle) throws {
         let input = try FileHandle(forReadingFrom: item.fileURL)
         defer { try? input.close() }
 
@@ -361,7 +372,7 @@ final class HLSDownloadManager: ObservableObject {
         if let remaining, remaining != 0 { throw HLSDownloadError.invalidRange }
     }
 
-    private func readDownloadedBytes(_ item: (fileURL: URL, statusCode: Int), range: HLSByteRange?) throws -> Data {
+    nonisolated private static func readDownloadedBytes(_ item: (fileURL: URL, statusCode: Int), range: HLSByteRange?) throws -> Data {
         let input = try FileHandle(forReadingFrom: item.fileURL)
         defer { try? input.close() }
         if let range {
@@ -389,7 +400,7 @@ final class HLSDownloadManager: ObservableObject {
         }
     }
 
-    private func sequenceIV(_ sequence: Int) -> Data {
+    nonisolated private static func sequenceIV(_ sequence: Int) -> Data {
         var value = UInt64(max(0, sequence)).bigEndian
         var bytes = [UInt8](repeating: 0, count: 16)
         withUnsafeBytes(of: &value) { raw in
@@ -398,7 +409,7 @@ final class HLSDownloadManager: ObservableObject {
         return Data(bytes)
     }
 
-    private func decryptAES128(_ input: Data, key: Data, iv: Data) throws -> Data {
+    nonisolated private static func decryptAES128(_ input: Data, key: Data, iv: Data) throws -> Data {
         guard key.count == kCCKeySizeAES128, iv.count == kCCBlockSizeAES128 else {
             throw HLSDownloadError.invalidKey
         }
