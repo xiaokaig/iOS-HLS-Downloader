@@ -387,6 +387,52 @@ struct BrowserView: UIViewRepresentable {
     })();
     """#
 
+    private func installContentRules(in contentController: WKUserContentController, coordinator: Coordinator) {
+        guard isAdRedirectBlockingEnabled else {
+            contentController.removeAllContentRuleLists()
+            coordinator.adRulesSignature = nil
+            return
+        }
+        let builtIn = [
+            "doubleclick.net", "googlesyndication.com", "googleadservices.com",
+            "adservice.google.com", "popads.net", "popcash.net", "propellerads.com",
+            "taboola.com", "outbrain.com", "adnxs.com", "exoclick.com",
+            "trafficjunky.net", "adsterra.com"
+        ]
+        let custom = customAdDomains.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+            .filter { !$0.isEmpty && !$0.contains("/") && !$0.contains(":") && !$0.contains(" ") }
+        let domains = Array(Set(builtIn + custom)).sorted().prefix(1200)
+        let signature = domains.joined(separator: "|")
+        guard coordinator.adRulesSignature != signature else { return }
+        coordinator.adRulesSignature = signature
+        let rules: [[String: Any]] = domains.map { domain in
+            let escaped = NSRegularExpression.escapedPattern(for: domain)
+            return [
+                "trigger": ["url-filter": "^https?://([^/]+\\.)*\\(escaped)([/:?#]|$)"],
+                "action": ["type": "block"]
+            ]
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rules),
+              let encoded = String(data: data, encoding: .utf8) else { return }
+        let identifier = "BrowserAdRules-\\(String(signature.hashValue.magnitude))"
+        WKContentRuleListStore.default().compileContentRuleList(
+            forIdentifier: identifier,
+            encodedContentRuleList: encoded
+        ) { list, error in
+            DispatchQueue.main.async {
+                guard coordinator.adRulesSignature == signature else { return }
+                contentController.removeAllContentRuleLists()
+                if let list {
+                    contentController.add(list)
+                    AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\\(domains.count) 个域名")
+                } else if let error {
+                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败：\\(error.localizedDescription)")
+                }
+            }
+        }
+    }
+
     func makeCoordinator() -> Coordinator {
         if let existing = controller.retainedCoordinator as? Coordinator {
             existing.onCapture = onCapture
@@ -427,6 +473,7 @@ struct BrowserView: UIViewRepresentable {
         }
         contentController.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
         contentController.add(WeakScriptMessageHandler(context.coordinator), name: "video")
+        installContentRules(in: contentController, coordinator: context.coordinator)
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
@@ -459,6 +506,7 @@ struct BrowserView: UIViewRepresentable {
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
         context.coordinator.customAdDomains = customAdDomains
+        installContentRules(in: webView.configuration.userContentController, coordinator: context.coordinator)
         let desktopModeChanged = context.coordinator.isDesktopMode != isDesktopMode
         if desktopModeChanged {
             context.coordinator.isDesktopMode = isDesktopMode
@@ -506,6 +554,7 @@ struct BrowserView: UIViewRepresentable {
         var isPopupBlockingEnabled: Bool
         var customAdDomains: String
         var isDesktopMode = false
+        var adRulesSignature: String?
 
         private static let builtInAdDomains: Set<String> = [
             "doubleclick.net",
