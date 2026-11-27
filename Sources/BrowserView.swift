@@ -242,6 +242,9 @@ struct BrowserView: UIViewRepresentable {
     let onCapture: (URL, [HTTPCookie]) -> Void
     let onAddressChange: (String) -> Void
     let isSniffingEnabled: Bool
+    let isAdRedirectBlockingEnabled: Bool
+    let isPopupBlockingEnabled: Bool
+    let customAdDomains: String
 
     private static let sniffingScript = """
     (() => {
@@ -319,7 +322,10 @@ struct BrowserView: UIViewRepresentable {
             controller: controller,
             onCapture: onCapture,
             onAddressChange: onAddressChange,
-            isSniffingEnabled: isSniffingEnabled
+            isSniffingEnabled: isSniffingEnabled,
+            isAdRedirectBlockingEnabled: isAdRedirectBlockingEnabled,
+            isPopupBlockingEnabled: isPopupBlockingEnabled,
+            customAdDomains: customAdDomains
         )
     }
 
@@ -355,6 +361,9 @@ struct BrowserView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
+        context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
+        context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
+        context.coordinator.customAdDomains = customAdDomains
         if controller.webView !== webView {
             controller.webView = webView
             context.coordinator.webView = webView
@@ -391,17 +400,64 @@ struct BrowserView: UIViewRepresentable {
         var onCapture: (URL, [HTTPCookie]) -> Void
         var onAddressChange: (String) -> Void
         var isSniffingEnabled: Bool
+        var isAdRedirectBlockingEnabled: Bool
+        var isPopupBlockingEnabled: Bool
+        var customAdDomains: String
+
+        private static let builtInAdDomains: Set<String> = [
+            "doubleclick.net",
+            "googlesyndication.com",
+            "googleadservices.com",
+            "adservice.google.com",
+            "popads.net",
+            "popcash.net",
+            "propellerads.com",
+            "taboola.com",
+            "outbrain.com",
+            "adnxs.com",
+            "exoclick.com",
+            "trafficjunky.net",
+            "adsterra.com"
+        ]
 
         init(
             controller: BrowserController,
             onCapture: @escaping (URL, [HTTPCookie]) -> Void,
             onAddressChange: @escaping (String) -> Void,
-            isSniffingEnabled: Bool
+            isSniffingEnabled: Bool,
+            isAdRedirectBlockingEnabled: Bool,
+            isPopupBlockingEnabled: Bool,
+            customAdDomains: String
         ) {
             self.controller = controller
             self.onCapture = onCapture
             self.onAddressChange = onAddressChange
             self.isSniffingEnabled = isSniffingEnabled
+            self.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
+            self.isPopupBlockingEnabled = isPopupBlockingEnabled
+            self.customAdDomains = customAdDomains
+        }
+
+        private func isBlockedAdDomain(_ host: String) -> Bool {
+            let normalizedHost = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            let custom = customAdDomains
+                .components(separatedBy: .newlines)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty && !$0.contains("/") && !$0.contains(":") && !$0.contains(" ") }
+            let domains = Self.builtInAdDomains.union(custom)
+            return domains.contains { normalizedHost == $0 || normalizedHost.hasSuffix("." + $0) }
+        }
+
+        private func shouldBlock(_ url: URL, isNewWindow: Bool) -> Bool {
+            if isNewWindow && isPopupBlockingEnabled {
+                AppDiagnostics.shared.log("ADBLOCK", "已拦截弹窗 url=\(AppDiagnostics.safeURL(url))")
+                return true
+            }
+            if isAdRedirectBlockingEnabled, let host = url.host, isBlockedAdDomain(host) {
+                AppDiagnostics.shared.log("ADBLOCK", "已拦截广告域名跳转 host=\(host)")
+                return true
+            }
+            return false
         }
 
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -426,7 +482,12 @@ struct BrowserView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
-            if navigationAction.targetFrame == nil {
+            let isNewWindow = navigationAction.targetFrame == nil
+            if shouldBlock(url, isNewWindow: isNewWindow) {
+                decisionHandler(.cancel)
+                return
+            }
+            if isNewWindow {
                 AppDiagnostics.shared.log("NAV", "网页请求新窗口，交由当前标签打开 url=\(AppDiagnostics.safeURL(url))")
             }
             // WebKit owns links, redirects, forms, history and frame navigation.
@@ -441,7 +502,9 @@ struct BrowserView: UIViewRepresentable {
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
             guard navigationAction.targetFrame == nil else { return nil }
-            AppDiagnostics.shared.log("NAV", "window.open 在当前标签承载 url=\(AppDiagnostics.safeURL(navigationAction.request.url))")
+            guard let url = navigationAction.request.url else { return nil }
+            if shouldBlock(url, isNewWindow: true) { return nil }
+            AppDiagnostics.shared.log("NAV", "window.open 在当前标签承载 url=\(AppDiagnostics.safeURL(url))")
             return webView
         }
 
