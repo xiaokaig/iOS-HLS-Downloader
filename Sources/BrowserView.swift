@@ -579,9 +579,8 @@ struct BrowserView: UIViewRepresentable {
                 return
             }
             let rules: [[String: Any]] = subset.map { domain in
-                let escaped = NSRegularExpression.escapedPattern(for: domain)
                 return [
-                    "trigger": ["url-filter": "^https?://([^/]+\\.)?\(escaped)([/:?#]|$)"],
+                    "trigger": ["url-filter": ".*", "if-domain": [domain, "*." + domain]],
                     "action": ["type": "block"]
                 ]
             }
