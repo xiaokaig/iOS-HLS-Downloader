@@ -379,15 +379,18 @@ struct ContentView: View {
 
     private func browserLibraryTool(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Label(title, systemImage: symbol)
-                .font(.caption.weight(.medium))
-                .labelStyle(.titleAndIcon)
-                .lineLimit(1)
-                .padding(.horizontal, 9)
-                .frame(height: 38)
-                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+            HStack(spacing: 7) {
+                Image(systemName: symbol).font(.system(size: 15, weight: .semibold))
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(.primary)
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Color(uiColor: .secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .foregroundStyle(.primary)
+        .buttonStyle(.plain)
     }
 
     private func browserShortcut(_ title: String, icon: String, url: String) -> some View {
