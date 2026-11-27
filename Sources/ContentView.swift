@@ -8,7 +8,8 @@ struct ContentView: View {
     @StateObject private var downloader = HLSDownloadManager()
     @StateObject private var directDownloader = DirectVideoDownloadManager()
     @StateObject private var library = BrowserLibraryStore()
-    @StateObject private var browserController = BrowserController()
+    @StateObject private var tabManager = BrowserTabManager()
+    private var browserController: BrowserController { tabManager.activeController }
     @State private var showingBrowserMenu = false
     @State private var showingDownloads = false
     @State private var showingFiles = false
@@ -57,7 +58,11 @@ struct ContentView: View {
         .tint(.blue)
         .onAppear {
             refreshFiles()
+            browserAddress = tabManager.activeTab.url
             AppDiagnostics.shared.log("APP", "ContentView appeared")
+        }
+        .onChange(of: tabManager.activeTabID) { _ in
+            browserAddress = tabManager.activeTab.url
         }
         .onChange(of: scenePhase) { phase in
             AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
@@ -129,9 +134,16 @@ struct ContentView: View {
                         onCapture: addCandidate,
                         onAddressChange: { value in
                             browserAddress = value
+                            let title = browserController.webView?.title ?? URL(string: value)?.host ?? value
+                            tabManager.update(tabManager.activeTabID, url: value, title: title)
                             if let url = URL(string: value), ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                                library.recordVisit(url: url, title: browserController.webView?.title ?? url.host ?? value)
+                                library.recordVisit(url: url, title: title)
                             }
+                        },
+                        onNewTab: { url in
+                            tabManager.addTab(url: url)
+                            browserAddress = url?.absoluteString ?? ""
+                            showingTabOverview = false
                         },
                         isSniffingEnabled: hlsSniffingEnabled,
                         isVideoSniffingEnabled: videoSniffingEnabled,
@@ -140,7 +152,7 @@ struct ContentView: View {
                         customAdDomains: customAdDomains,
                         isDesktopMode: browserDesktopMode
                     )
-                    .id(browserController.webViewID)
+                    .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
 
                     if browserAddress.isEmpty && currentPageURL == nil {
                         VStack(spacing: 22) {
@@ -150,17 +162,7 @@ struct ContentView: View {
                                 Text("轻装上网").font(.title3.weight(.semibold))
                                 Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
                             }
-                            VStack(spacing: 12) {
-                                HStack(spacing: 12) {
-                                    browserLibraryTool("下载管理", symbol: "arrow.down.circle.fill") {
-                                        showingBrowserMenu = false
-                                        showingDownloads = true
-                                    }
-                                    browserLibraryTool("已下载文件", symbol: "folder.fill") {
-                                        showingBrowserMenu = false
-                                        showingFiles = true
-                                    }
-                                }
+                            VStack(spacing: 14) {
                                 HStack(spacing: 14) {
                                     browserShortcut("百度", icon: "magnifyingglass", url: "https://www.baidu.com")
                                     browserShortcut("必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com")
@@ -181,9 +183,18 @@ struct ContentView: View {
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
                     browserTool("house") { openHomePage() }
                     Button { showingTabOverview = true } label: {
-                        Image(systemName: "square.on.square")
-                            .font(.system(size: 19, weight: .medium))
-                            .frame(maxWidth: .infinity, minHeight: 48)
+                        ZStack(alignment: .topTrailing) {
+                            Image(systemName: "square.on.square")
+                                .font(.system(size: 19, weight: .medium))
+                                .frame(maxWidth: .infinity, minHeight: 48)
+                            Text("\(tabManager.tabs.count)")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundStyle(.white)
+                                .padding(.horizontal, 4)
+                                .frame(minWidth: 15, minHeight: 15)
+                                .background(.blue, in: Capsule())
+                                .offset(x: -8, y: 5)
+                        }
                     }
                     .buttonStyle(.plain)
                     Button { showingBrowserMenu = true } label: {
@@ -334,21 +345,63 @@ struct ContentView: View {
 
     private var tabOverviewSheet: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "square.on.square").font(.system(size: 36)).foregroundStyle(.secondary)
-                Text("当前标签页").font(.headline)
-                Text(currentPageURL?.host ?? "起始页").font(.subheadline).foregroundStyle(.secondary)
-                Text("当前版本暂时保留单个活动网页；多标签页独立 WebView 与恢复机制将在后续版本完善。")
-                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    .padding(.horizontal)
-                Button("新建起始页") {
-                    browserAddress = ""
-                    browserController.rebuildWebView()
-                    showingTabOverview = false
-                }.buttonStyle(.borderedProminent)
-                Spacer()
-            }.padding(.top, 30)
-            .navigationTitle("标签页")
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 14) {
+                    ForEach(tabManager.tabs) { tab in
+                        VStack(alignment: .leading, spacing: 9) {
+                            ZStack(alignment: .topTrailing) {
+                                RoundedRectangle(cornerRadius: 12)
+                                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                                    .frame(height: 112)
+                                    .overlay {
+                                        VStack(spacing: 7) {
+                                            Image(systemName: "safari").font(.system(size: 28)).foregroundStyle(.secondary)
+                                            Text(tab.url.isEmpty ? "起始页" : (URL(string: tab.url)?.host ?? tab.url))
+                                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                        }.padding(.horizontal, 8)
+                                    }
+                                Button {
+                                    tabManager.close(tab.id)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill").font(.title3).symbolRenderingMode(.palette)
+                                        .foregroundStyle(.white, .gray)
+                                }.padding(7)
+                            }
+                            Text(tab.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                            Text(tab.url.isEmpty ? "新标签页" : tab.url)
+                                .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                        .padding(9)
+                        .background(tab.id == tabManager.activeTabID ? Color.blue.opacity(0.10) : Color(uiColor: .secondarySystemGroupedBackground),
+                                    in: RoundedRectangle(cornerRadius: 16))
+                        .overlay(RoundedRectangle(cornerRadius: 16).stroke(tab.id == tabManager.activeTabID ? Color.blue.opacity(0.5) : .clear, lineWidth: 1))
+                        .contentShape(RoundedRectangle(cornerRadius: 16))
+                        .onTapGesture {
+                            tabManager.activate(tab.id)
+                            browserAddress = tab.url
+                            showingTabOverview = false
+                        }
+                        .contextMenu {
+                            Button("关闭标签页", role: .destructive) { tabManager.close(tab.id) }
+                            Button("关闭其他标签页") { tabManager.closeOthers(keeping: tab.id) }
+                        }
+                    }
+                    Button {
+                        tabManager.addTab()
+                        browserAddress = ""
+                        showingTabOverview = false
+                    } label: {
+                        VStack(spacing: 12) {
+                            Image(systemName: "plus").font(.system(size: 28, weight: .medium))
+                            Text("新建标签页").font(.subheadline.weight(.medium))
+                        }
+                        .frame(maxWidth: .infinity, minHeight: 158)
+                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+                    }.buttonStyle(.plain)
+                }.padding()
+            }
+            .background(Color(uiColor: .systemGroupedBackground))
+            .navigationTitle("标签页（\(tabManager.tabs.count)）")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { showingTabOverview = false } } }
         }
@@ -732,7 +785,7 @@ struct ContentView: View {
                 }
                 Section("主页") {
                     Picker("主页内容", selection: $browserHomePage) {
-                        Text("下载器起始页").tag("start")
+                        Text("起始页").tag("start")
                         Text("自定义网址").tag("custom")
                     }
                     if browserHomePage == "custom" {
@@ -741,7 +794,7 @@ struct ContentView: View {
                             .autocorrectionDisabled()
                             .keyboardType(.URL)
                     }
-                    Text("点击浏览器底部的主页按钮时打开此页面。下载器起始页提供下载管理和文件入口。")
+                    Text("点击浏览器底部的主页按钮时打开此页面。起始页仅提供搜索和常用网站快捷入口。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("地址栏与搜索") {
