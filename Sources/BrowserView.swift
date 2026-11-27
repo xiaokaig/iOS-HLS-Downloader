@@ -113,7 +113,8 @@ final class BrowserController: ObservableObject {
     @Published private(set) var diagnostic = "等待输入网址"
     @Published var webViewID = UUID()
 
-    weak var webView: WKWebView?
+    var webView: WKWebView?
+    var retainedCoordinator: AnyObject?
     private var requestedKey: String?
     private var navigationStartedAt: Date?
 
@@ -179,6 +180,7 @@ final class BrowserController: ObservableObject {
         webView?.navigationDelegate = nil
         webView?.uiDelegate = nil
         webView = nil
+        retainedCoordinator = nil
         requestedKey = nil
         navigationStartedAt = nil
         canGoBack = false
@@ -186,6 +188,14 @@ final class BrowserController: ObservableObject {
         isLoading = false
         diagnostic = "阶段：浏览器已重置"
         webViewID = UUID()
+    }
+
+    func dispose() {
+        webView?.stopLoading()
+        webView?.navigationDelegate = nil
+        webView?.uiDelegate = nil
+        webView = nil
+        retainedCoordinator = nil
     }
 
     static func navigationKey(_ url: URL) -> String {
@@ -241,6 +251,7 @@ struct BrowserView: UIViewRepresentable {
     @ObservedObject var controller: BrowserController
     let onCapture: (URL, [HTTPCookie], Bool) -> Void
     let onAddressChange: (String) -> Void
+    let onNewTab: (URL?) -> Void
     let isSniffingEnabled: Bool
     let isVideoSniffingEnabled: Bool
     let isAdRedirectBlockingEnabled: Bool
@@ -377,19 +388,34 @@ struct BrowserView: UIViewRepresentable {
     """#
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(
+        if let existing = controller.retainedCoordinator as? Coordinator {
+            existing.onCapture = onCapture
+            existing.onAddressChange = onAddressChange
+            existing.onNewTab = onNewTab
+            return existing
+        }
+        let coordinator = Coordinator(
             controller: controller,
             onCapture: onCapture,
             onAddressChange: onAddressChange,
+            onNewTab: onNewTab,
             isSniffingEnabled: isSniffingEnabled,
             isVideoSniffingEnabled: isVideoSniffingEnabled,
             isAdRedirectBlockingEnabled: isAdRedirectBlockingEnabled,
             isPopupBlockingEnabled: isPopupBlockingEnabled,
             customAdDomains: customAdDomains
         )
+        controller.retainedCoordinator = coordinator
+        return coordinator
     }
 
     func makeUIView(context: Context) -> WKWebView {
+        if let existing = controller.webView {
+            existing.navigationDelegate = context.coordinator
+            existing.uiDelegate = context.coordinator
+            context.coordinator.webView = existing
+            return existing
+        }
         let contentController = WKUserContentController()
         if isSniffingEnabled {
             contentController.addUserScript(
@@ -412,6 +438,9 @@ struct BrowserView: UIViewRepresentable {
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
+        let refreshControl = UIRefreshControl()
+        refreshControl.addTarget(context.coordinator, action: #selector(Coordinator.refreshPage), for: .valueChanged)
+        webView.scrollView.refreshControl = refreshControl
 
         context.coordinator.webView = webView
         controller.webView = webView
@@ -426,6 +455,7 @@ struct BrowserView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
+        context.coordinator.onNewTab = onNewTab
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
         context.coordinator.customAdDomains = customAdDomains
@@ -461,12 +491,7 @@ struct BrowserView: UIViewRepresentable {
     }
 
     static func dismantleUIView(_ webView: WKWebView, coordinator: Coordinator) {
-        webView.stopLoading()
-        webView.navigationDelegate = nil
-        webView.uiDelegate = nil
-        if coordinator.controller.webView === webView {
-            coordinator.controller.webView = nil
-        }
+        // Keep inactive tab WebViews and their navigation state alive.
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
@@ -474,6 +499,7 @@ struct BrowserView: UIViewRepresentable {
         weak var webView: WKWebView?
         var onCapture: (URL, [HTTPCookie], Bool) -> Void
         var onAddressChange: (String) -> Void
+        var onNewTab: (URL?) -> Void
         var isSniffingEnabled: Bool
         var isVideoSniffingEnabled: Bool
         var isAdRedirectBlockingEnabled: Bool
@@ -501,6 +527,7 @@ struct BrowserView: UIViewRepresentable {
             controller: BrowserController,
             onCapture: @escaping (URL, [HTTPCookie], Bool) -> Void,
             onAddressChange: @escaping (String) -> Void,
+            onNewTab: @escaping (URL?) -> Void,
             isSniffingEnabled: Bool,
             isVideoSniffingEnabled: Bool,
             isAdRedirectBlockingEnabled: Bool,
@@ -510,6 +537,7 @@ struct BrowserView: UIViewRepresentable {
             self.controller = controller
             self.onCapture = onCapture
             self.onAddressChange = onAddressChange
+            self.onNewTab = onNewTab
             self.isSniffingEnabled = isSniffingEnabled
             self.isVideoSniffingEnabled = isVideoSniffingEnabled
             self.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
@@ -549,6 +577,11 @@ struct BrowserView: UIViewRepresentable {
             }
         }
 
+        @objc func refreshPage() {
+            controller.reload()
+            webView?.scrollView.refreshControl?.endRefreshing()
+        }
+
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard ["hls", "video"].contains(message.name),
                   let value = message.body as? String,
@@ -572,11 +605,8 @@ struct BrowserView: UIViewRepresentable {
                 return
             }
             if isNewWindow {
-                // Do not let WebKit create a secondary page. Loading it here keeps
-                // the navigation in this WKWebView and avoids returning this same
-                // WKWebView from createWebViewWith (which can abort the app).
-                AppDiagnostics.shared.log("NAV", "新窗口请求转为当前标签导航 url=\(AppDiagnostics.safeURL(url))")
-                webView.load(navigationAction.request)
+                AppDiagnostics.shared.log("TAB", "网页请求在新标签打开 url=\(AppDiagnostics.safeURL(url))")
+                onNewTab(url)
                 decisionHandler(.cancel)
                 return
             }
