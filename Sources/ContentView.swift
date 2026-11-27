@@ -1424,7 +1424,7 @@ struct ContentView: View {
         showingAListDirectoryPicker = false
         guard let fileURL = pendingAListUploadURL else { return }
         pendingAListUploadURL = nil
-        performAListUpload(fileURL)
+        uploadToAList(fileURL)
     }
 
     private func testAListConnection() {
