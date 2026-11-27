@@ -10,6 +10,8 @@ struct ContentView: View {
     @StateObject private var library = BrowserLibraryStore()
     @StateObject private var browserController = BrowserController()
     @State private var showingBrowserMenu = false
+    @State private var showingDownloads = false
+    @State private var showingFiles = false
     @State private var showingTabOverview = false
     @AppStorage("browserDesktopMode") private var browserDesktopMode = false
     @AppStorage("browserStripMobilePrefix") private var browserStripMobilePrefix = false
@@ -152,11 +154,11 @@ struct ContentView: View {
                                 HStack(spacing: 12) {
                                     browserLibraryTool("下载管理", symbol: "arrow.down.circle.fill") {
                                         showingBrowserMenu = false
-                                        browserMenuRoute = .downloads
+                                        showingDownloads = true
                                     }
                                     browserLibraryTool("已下载文件", symbol: "folder.fill") {
                                         showingBrowserMenu = false
-                                        browserMenuRoute = .files
+                                        showingFiles = true
                                     }
                                 }
                                 HStack(spacing: 14) {
@@ -207,6 +209,8 @@ struct ContentView: View {
             .sheet(isPresented: $showingBrowserCandidates) { browserCandidatesSheet }
             .sheet(isPresented: $showingBrowsingHistory) { browsingHistorySheet }
             .sheet(isPresented: $showingBookmarks) { browserBookmarksSheet }
+            .sheet(isPresented: $showingDownloads) { downloadsTab }
+            .sheet(isPresented: $showingFiles) { filesTab }
             .sheet(isPresented: $showingBrowserMenu) {
                 browserMenuSheet
                     .presentationDetents([.medium, .large])
