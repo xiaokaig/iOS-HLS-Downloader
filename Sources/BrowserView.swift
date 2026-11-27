@@ -201,6 +201,7 @@ final class BrowserController: ObservableObject {
     private var pendingStartPage = false
 
     func showStartPage() {
+        isShowingStartPage = true
         guard let webView else {
             pendingStartPage = true
             webViewID = UUID()
@@ -221,12 +222,16 @@ final class BrowserController: ObservableObject {
     }
 
     private func displayStartPage(in view: WKWebView) {
+        view.stopLoading()
         requestedKey = nil
+        isShowingStartPage = true
         navigationStartedAt = Date()
-        estimatedProgress = 0.03
-        showsNavigationProgress = true
+        estimatedProgress = 0
+        showsNavigationProgress = false
         diagnostic = "阶段：返回起始页"
-        AppDiagnostics.shared.log("NAV", "返回应用起始页（复用当前 WKWebView）")
+        AppDiagnostics.shared.log("NAV", "返回应用起始页（显示原生起始页覆盖层）")
+        // Keep a harmless blank document underneath. The visible start page is
+        // the native SwiftUI overlay, not an empty HTML document.
         view.loadHTMLString("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body></body></html>", baseURL: nil)
         update(view)
     }
