@@ -196,6 +196,18 @@ final class BrowserController: ObservableObject {
         update(webView)
     }
 
+    func showStartPage() {
+        guard let webView else { return }
+        requestedKey = nil
+        navigationStartedAt = Date()
+        estimatedProgress = 0.03
+        showsNavigationProgress = true
+        diagnostic = "阶段：返回起始页"
+        AppDiagnostics.shared.log("NAV", "返回应用起始页（复用当前 WKWebView）")
+        webView.loadHTMLString("<!doctype html><html><head><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body></body></html>", baseURL: nil)
+        update(webView)
+    }
+
     func goHome() {
         guard let url = URL(string: "https://www.google.com/") else { return }
         load(url)
@@ -900,7 +912,9 @@ struct BrowserView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             controller.navigationFinished(webView)
             webView.evaluateJavaScript("document.documentElement.style.zoom = '\(zoomLevel)'", completionHandler: nil)
-            if let url = webView.url { onAddressChange(url.absoluteString) }
+            if let url = webView.url, ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                onAddressChange(url.absoluteString)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
