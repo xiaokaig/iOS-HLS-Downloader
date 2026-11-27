@@ -156,7 +156,7 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionUploadDele
         status = "正在取消上传…"
     }
 
-    func urlSession(
+    nonisolated func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
         didSendBodyData bytesSent: Int64,
@@ -164,10 +164,13 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionUploadDele
         totalBytesExpectedToSend: Int64
     ) {
         guard totalBytesExpectedToSend > 0 else { return }
-        progress = min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))
+        let fraction = min(1, Double(totalBytesSent) / Double(totalBytesExpectedToSend))
         let sent = ByteCountFormatter.string(fromByteCount: totalBytesSent, countStyle: .file)
         let total = ByteCountFormatter.string(fromByteCount: totalBytesExpectedToSend, countStyle: .file)
-        status = "上传中 · \(sent) / \(total)"
+        Task { @MainActor in
+            self.progress = fraction
+            self.status = "上传中 · \(sent) / \(total)"
+        }
     }
 
     private func finishUpload(data: Data?, response: URLResponse?, error: Error?) {
