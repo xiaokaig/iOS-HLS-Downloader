@@ -293,17 +293,25 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionTaskDelega
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
 
         let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse,
-              (200..<300).contains(http.statusCode),
-              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            throw AListUploadError.invalidCredentials
+        guard let http = response as? HTTPURLResponse else {
+            throw AListUploadError.invalidResponse
+        }
+        let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard (200..<300).contains(http.statusCode) else {
+            let message = object?["message"] as? String
+                ?? String(data: data.prefix(300), encoding: .utf8)
+                ?? "服务器未返回可读错误信息"
+            throw AListUploadError.server("AList 登录请求失败（HTTP \(http.statusCode)）：\(message)")
+        }
+        guard let object else {
+            throw AListUploadError.server("AList 登录响应不是有效 JSON（HTTP \(http.statusCode)）")
         }
         let code = object["code"] as? Int ?? http.statusCode
         guard code == 200,
               let payload = object["data"] as? [String: Any],
               let token = payload["token"] as? String,
               !token.isEmpty else {
-            throw AListUploadError.server(object["message"] as? String ?? "AList 登录失败")
+            throw AListUploadError.server(object["message"] as? String ?? "AList 登录失败（响应中没有 Token，错误码 \(code)）")
         }
         return token
     }
