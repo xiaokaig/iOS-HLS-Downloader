@@ -1,106 +1,130 @@
 import SwiftUI
 import WebKit
 
+@MainActor
+final class BrowserController: ObservableObject {
+    @Published private(set) var canGoBack = false
+    @Published private(set) var canGoForward = false
+    @Published private(set) var isLoading = false
+    weak var webView: WKWebView?
+    private(set) var lastAddress = ""
+
+    func load(_ url: URL) { lastAddress = url.absoluteString; webView?.load(URLRequest(url: url)) }
+    func goBack() { webView?.goBack() }
+    func goForward() { webView?.goForward() }
+    func reload() { webView?.reload() }
+    func goHome() { if let url = URL(string: "https://www.google.com") { load(url) } }
+    func update(_ view: WKWebView) {
+        canGoBack = view.canGoBack
+        canGoForward = view.canGoForward
+        isLoading = view.isLoading
+        if let url = view.url { lastAddress = url.absoluteString }
+    }
+}
+
 struct BrowserView: UIViewRepresentable {
     let address: String
+    @ObservedObject var controller: BrowserController
     let onCapture: (URL, [HTTPCookie]) -> Void
     let onAddressChange: (String) -> Void
 
-    func makeCoordinator() -> Coordinator {
-        Coordinator(onCapture: onCapture, onAddressChange: onAddressChange)
-    }
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, onCapture: onCapture, onAddressChange: onAddressChange) }
 
     func makeUIView(context: Context) -> WKWebView {
-        let controller = WKUserContentController()
+        let userController = WKUserContentController()
         let script = """
         (() => {
-          const notify = (value) => {
+          const notify = value => {
             try {
               const raw = value && value.url ? value.url : value;
               const absolute = new URL(String(raw), location.href).href;
-              if (/m3u8(?:[?#]|$)/i.test(absolute)) {
-                window.webkit.messageHandlers.hls.postMessage(absolute);
-              }
+              if (/m3u8(?:[/?#]|$)/i.test(absolute)) window.webkit.messageHandlers.hls.postMessage(absolute);
             } catch (_) {}
           };
           const originalFetch = window.fetch;
           window.fetch = function(input, init) {
-            notify(input && input.url ? input.url : input);
-            return originalFetch.apply(this, arguments);
+            const raw = input && input.url ? input.url : input;
+            notify(raw);
+            const promise = originalFetch.apply(this, arguments);
+            promise.then(response => {
+              const type = (response.headers.get('content-type') || '').toLowerCase();
+              if (/mpegurl|vnd\\.apple\\.mpegurl/.test(type)) notify(response.url);
+              else response.clone().text().then(body => {
+                if (body.trimStart().replace(/^\\uFEFF/, '').startsWith('#EXTM3U')) notify(response.url);
+              }).catch(() => {});
+            }).catch(() => {});
+            return promise;
           };
           const originalOpen = XMLHttpRequest.prototype.open;
-          XMLHttpRequest.prototype.open = function(method, url) {
-            notify(url);
-            return originalOpen.apply(this, arguments);
+          XMLHttpRequest.prototype.open = function(method, url) { this.__hlsURL = url; return originalOpen.apply(this, arguments); };
+          const originalSend = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.send = function() {
+            this.addEventListener('load', function() {
+              try {
+                const type = (this.getResponseHeader('content-type') || '').toLowerCase();
+                const body = typeof this.responseText === 'string' ? this.responseText : '';
+                if (/mpegurl|vnd\\.apple\\.mpegurl/.test(type) || body.trimStart().replace(/^\\uFEFF/, '').startsWith('#EXTM3U')) notify(this.responseURL || this.__hlsURL);
+              } catch (_) {}
+            });
+            return originalSend.apply(this, arguments);
           };
-          const scan = () => performance.getEntriesByType('resource').forEach(entry => notify(entry.name));
-          try {
-            new PerformanceObserver(list => list.getEntries().forEach(entry => notify(entry.name)))
-              .observe({ entryTypes: ['resource'] });
-          } catch (_) {}
-          setInterval(scan, 2500);
+          const scan = () => {
+            performance.getEntriesByType('resource').forEach(entry => notify(entry.name));
+            document.querySelectorAll('video,source').forEach(node => { if (node.currentSrc) notify(node.currentSrc); if (node.src) notify(node.src); });
+          };
+          try { new PerformanceObserver(list => list.getEntries().forEach(entry => notify(entry.name))).observe({entryTypes:['resource']}); } catch (_) {}
+          new MutationObserver(scan).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
+          scan();
         })();
         """
-        controller.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        controller.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
-
+        userController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        userController.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
         let configuration = WKWebViewConfiguration()
-        configuration.userContentController = controller
+        configuration.userContentController = userController
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         context.coordinator.webView = webView
+        controller.webView = webView
         webView.allowsBackForwardNavigationGestures = true
-        if let url = URL(string: address), url.scheme == "https" || url.scheme == "http" {
-            webView.load(URLRequest(url: url))
-        }
+        if let url = URL(string: address), url.host != nil { controller.load(url) }
         return webView
     }
 
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
-        guard let url = URL(string: address), url.scheme == "https" || url.scheme == "http" else { return }
-        if webView.url?.absoluteString != url.absoluteString {
-            webView.load(URLRequest(url: url))
-        }
+        if controller.webView !== webView { controller.webView = webView }
+        if controller.lastAddress != address, let url = URL(string: address), url.host != nil { controller.load(url) }
     }
 
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        let controller: BrowserController
         weak var webView: WKWebView?
         var onCapture: (URL, [HTTPCookie]) -> Void
         var onAddressChange: (String) -> Void
-
-        init(onCapture: @escaping (URL, [HTTPCookie]) -> Void, onAddressChange: @escaping (String) -> Void) {
-            self.onCapture = onCapture
-            self.onAddressChange = onAddressChange
+        init(controller: BrowserController, onCapture: @escaping (URL,[HTTPCookie])->Void, onAddressChange: @escaping (String)->Void) {
+            self.controller = controller; self.onCapture = onCapture; self.onAddressChange = onAddressChange
         }
-
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let value = message.body as? String, let url = URL(string: value) else { return }
-            guard let webView else {
-                onCapture(url, [])
-                return
-            }
+            guard let webView else { onCapture(url, []); return }
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                DispatchQueue.main.async {
-                    self?.onCapture(url, cookies)
-                }
+                DispatchQueue.main.async { self?.onCapture(url, cookies) }
             }
         }
-
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { controller.update(webView) }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            controller.update(webView)
             if let url = webView.url { onAddressChange(url.absoluteString) }
         }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { controller.update(webView) }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { controller.update(webView) }
     }
 }
 
 private final class WeakScriptMessageHandler: NSObject, WKScriptMessageHandler {
     weak var delegate: WKScriptMessageHandler?
-
-    init(_ delegate: WKScriptMessageHandler) {
-        self.delegate = delegate
-    }
-
+    init(_ delegate: WKScriptMessageHandler) { self.delegate = delegate }
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         delegate?.userContentController(userContentController, didReceive: message)
     }

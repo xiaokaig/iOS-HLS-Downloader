@@ -38,11 +38,20 @@ final class HLSDownloadManager: ObservableObject {
 
     private var keyCache: [URL: Data] = [:]
 
-    func variants(for url: URL, cookies: [HTTPCookie] = []) async throws -> [HLSVariant] {
-        status = "解析清晰度…"
+    func inspectPlaylist(_ url: URL, cookies: [HTTPCookie] = []) async throws -> HLSInspection {
+        status = "解析播放列表…"
         let text = try await fetchText(url, cookies: cookies)
         let parsed = try HLSParser.parse(text, baseURL: url)
-        return parsed.variants
+        return HLSInspection(
+            variants: parsed.variants,
+            segmentCount: parsed.segments.count,
+            duration: parsed.segments.reduce(0) { $0 + $1.duration },
+            isEndList: parsed.variants.isEmpty ? parsed.isEndList : true
+        )
+    }
+
+    func variants(for url: URL, cookies: [HTTPCookie] = []) async throws -> [HLSVariant] {
+        try await inspectPlaylist(url, cookies: cookies).variants
     }
 
     func start(url: URL, cookies: [HTTPCookie] = []) async throws -> URL {
@@ -273,64 +282,12 @@ final class HLSDownloadManager: ObservableObject {
     }
 
     private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
-        let asset = AVURLAsset(url: sourceURL)
-        let compatiblePresets = AVAssetExportSession.exportPresets(compatibleWith: asset)
-        let preferredPresets = [
-            AVAssetExportPresetPassthrough,
-            AVAssetExportPresetHighestQuality,
-            AVAssetExportPresetMediumQuality
-        ]
-
-        var exporter: AVAssetExportSession?
-        for preset in preferredPresets where compatiblePresets.contains(preset) {
-            guard let candidate = AVAssetExportSession(asset: asset, presetName: preset) else { continue }
-            if candidate.supportedFileTypes.contains(.mp4) {
-                exporter = candidate
-                break
-            }
-        }
-        guard let exporter else {
-            throw NSError(
-                domain: "HLSDownloader.MP4Conversion",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "系统无法将该 TS 视频导出为 MP4（当前编码或容器不受支持）"]
-            )
-        }
-
         let destination = sourceURL.deletingPathExtension().appendingPathExtension("mp4")
         try? FileManager.default.removeItem(at: destination)
-        exporter.outputURL = destination
-        exporter.outputFileType = .mp4
-        exporter.shouldOptimizeForNetworkUse = true
-
-        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
-            exporter.exportAsynchronously {
-                continuation.resume()
-            }
-        }
-
-        guard exporter.status == .completed else {
-            try? FileManager.default.removeItem(at: destination)
-            if let error = exporter.error as NSError? {
-                throw NSError(
-                    domain: error.domain,
-                    code: error.code,
-                    userInfo: [NSLocalizedDescriptionKey: "MP4 导出失败（\(error.domain) / \(error.code)）：\(error.localizedDescription)"]
-                )
-            }
-            throw NSError(
-                domain: "HLSDownloader.MP4Conversion",
-                code: Int(exporter.status.rawValue),
-                userInfo: [NSLocalizedDescriptionKey: "MP4 导出未完成，状态：\(exporter.status.rawValue)"]
-            )
-        }
-        let attributes = try FileManager.default.attributesOfItem(atPath: destination.path)
-        guard ((attributes[FileAttributeKey.size] as? NSNumber)?.int64Value ?? 0) > 0 else {
-            try? FileManager.default.removeItem(at: destination)
-            throw HLSDownloadError.emptyDownload
-        }
+        let remuxer = VLCTSRemuxer()
+        let result = try await remuxer.remux(source: sourceURL, destination: destination)
         try? FileManager.default.removeItem(at: sourceURL)
-        return destination
+        return result
     }
 
     private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> String {

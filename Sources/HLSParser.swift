@@ -14,8 +14,9 @@ enum HLSParserError: LocalizedError {
 
 enum HLSParser {
     static func parse(_ text: String, baseURL: URL) throws -> HLSPlaylist {
-        let lines = text.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-        guard lines.contains(where: { $0 == "#EXTM3U" }) else { throw HLSParserError.emptyPlaylist }
+        let normalizedText = text.replacingOccurrences(of: "\u{FEFF}", with: "")
+        let lines = normalizedText.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        guard lines.first(where: { !$0.isEmpty }) == "#EXTM3U" else { throw HLSParserError.emptyPlaylist }
 
         var variants: [HLSVariant] = []
         var segments: [HLSSegment] = []
@@ -35,6 +36,12 @@ enum HLSParser {
                 nextSequence = mediaSequence
             } else if line.hasPrefix("#EXT-X-STREAM-INF:") {
                 pendingVariant = attributes(String(line.dropFirst("#EXT-X-STREAM-INF:".count)))
+            } else if line.hasPrefix("#EXT-X-I-FRAME-STREAM-INF:") {
+                let attrs = attributes(String(line.dropFirst("#EXT-X-I-FRAME-STREAM-INF:".count)))
+                if let rawURL = attrs["URI"], let variantURL = URL(string: rawURL, relativeTo: baseURL)?.absoluteURL {
+                    let bandwidth = Int(attrs["AVERAGE-BANDWIDTH"] ?? attrs["BANDWIDTH"] ?? "0") ?? 0
+                    variants.append(HLSVariant(url: variantURL, bandwidth: bandwidth, resolution: attrs["RESOLUTION"]))
+                }
             } else if line.hasPrefix("#EXTINF:") {
                 let raw = String(line.dropFirst("#EXTINF:".count)).components(separatedBy: ",").first ?? "0"
                 pendingDuration = Double(raw) ?? 0

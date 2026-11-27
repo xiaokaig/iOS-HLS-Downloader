@@ -25,11 +25,19 @@ jobs:
           if [ -n "$XCODE_PATH" ]; then sudo xcode-select -s "$XCODE_PATH/Contents/Developer"; fi
           xcodebuild -version
 
-      - name: Install XcodeGen
-        run: brew install xcodegen
+      - name: Install XcodeGen and SVG renderer
+        run: brew install xcodegen librsvg
+
+      - name: Generate app icon
+        run: |
+          rsvg-convert -w 1024 -h 1024 Assets.xcassets/AppIcon.appiconset/AppIcon.svg -o Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          test -s Assets.xcassets/AppIcon.appiconset/AppIcon.png
 
       - name: Generate project
         run: xcodegen generate
+
+      - name: Resolve Swift packages
+        run: xcodebuild -resolvePackageDependencies -project HLSDownloader.xcodeproj -scheme HLSDownloader
 
       - name: Build for iPhone (unsigned)
         run: |

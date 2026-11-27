@@ -5,6 +5,7 @@ import UIKit
 
 struct ContentView: View {
     @StateObject private var downloader = HLSDownloadManager()
+    @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
 
     // Browser
@@ -17,6 +18,11 @@ struct ContentView: View {
     @State private var pendingURL: URL?
     @State private var pendingCookies: [HTTPCookie] = []
     @State private var variants: [HLSVariant] = []
+    @State private var selectedVariantURL: URL?
+    @State private var parsedSegmentCount = 0
+    @State private var parsedDuration = 0.0
+    @State private var parsedIsEndList = false
+    @State private var isInspecting = false
     @State private var showingVariants = false
     @State private var errorMessage: String?
 
@@ -72,6 +78,10 @@ struct ContentView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 HStack(spacing: 8) {
+                    Button { browserController.goBack() } label: { Image(systemName: "chevron.left") }
+                        .disabled(!browserController.canGoBack)
+                    Button { browserController.goForward() } label: { Image(systemName: "chevron.right") }
+                        .disabled(!browserController.canGoForward)
                     Image(systemName: "lock.fill")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -82,9 +92,10 @@ struct ContentView: View {
                         .submitLabel(.go)
                         .onSubmit(loadBrowserAddress)
                     Button(action: loadBrowserAddress) {
-                        Image(systemName: "arrow.right.circle.fill")
-                            .font(.title2)
+                        Image(systemName: "arrow.right.circle.fill").font(.title2)
                     }
+                    Button { browserController.reload() } label: { Image(systemName: "arrow.clockwise") }
+                    Button { browserController.goHome() } label: { Image(systemName: "house") }
                     .disabled(browserAddress.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 .padding(12)
@@ -95,6 +106,7 @@ struct ContentView: View {
 
                 BrowserView(
                     address: browserAddress,
+                    controller: browserController,
                     onCapture: addCandidate,
                     onAddressChange: { browserAddress = $0 }
                 )
@@ -189,8 +201,8 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                         }
                         Button(action: parseDirectURL) {
-                            Label("解析并下载", systemImage: "arrow.down.to.line")
-                                .frame(maxWidth: .infinity)
+                            if isInspecting { ProgressView().frame(maxWidth: .infinity) }
+                            else { Label("解析地址", systemImage: "text.magnifyingglass").frame(maxWidth: .infinity) }
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || downloader.isDownloading)
@@ -351,7 +363,9 @@ struct ContentView: View {
                         .foregroundStyle(.primary)
                     Label("AES-128 加密", systemImage: "checkmark.circle.fill")
                         .foregroundStyle(.primary)
-                    Label("TS 转 MP4（尽力尝试）", systemImage: "checkmark.circle")
+                    Label("TS 兼容播放（VLC）", systemImage: "checkmark.circle.fill")
+                        .foregroundStyle(.primary)
+                    Label("TS 无损封装 MP4（尽力尝试）", systemImage: "checkmark.circle")
                         .foregroundStyle(.primary)
                     Label("直播 / DRM / SAMPLE-AES", systemImage: "xmark.circle")
                         .foregroundStyle(.secondary)
@@ -369,39 +383,40 @@ struct ContentView: View {
         NavigationStack {
             List {
                 if variants.isEmpty {
-                    Text("未发现多个清晰度，将直接下载原始播放列表。")
-                        .foregroundStyle(.secondary)
+                    Section("播放列表信息") {
+                        LabeledContent("分片数量", value: "\(parsedSegmentCount)")
+                        LabeledContent("时长", value: formattedDuration(parsedDuration))
+                        LabeledContent("类型", value: parsedIsEndList ? "VOD 点播" : "非完整列表")
+                    }
                 } else {
-                    ForEach(variants) { variant in
-                        Button {
-                            showingVariants = false
-                            startDownload(variant.url, cookies: pendingCookies)
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(variant.resolution ?? "清晰度未知")
-                                        .font(.headline)
-                                    Text(variant.bandwidth > 0 ? String(format: "%.2f Mbps", Double(variant.bandwidth) / 1_000_000) : "码率未知")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                    Section("选择清晰度") {
+                        ForEach(variants) { variant in
+                            Button { selectedVariantURL = variant.url } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        Text(variant.resolution ?? "清晰度未知").font(.headline)
+                                        Text(variant.bandwidth > 0 ? String(format: "%.2f Mbps", Double(variant.bandwidth) / 1_000_000) : "码率未知")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: selectedVariantURL == variant.url ? "largecircle.fill.circle" : "circle")
+                                        .foregroundStyle(selectedVariantURL == variant.url ? .blue : .secondary)
                                 }
-                                Spacer()
-                                Image(systemName: "arrow.down.circle")
-                                    .foregroundStyle(.blue)
-                            }
-                            .contentShape(Rectangle())
+                            }.buttonStyle(.plain)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
             }
-            .navigationTitle("选择清晰度")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("取消") { showingVariants = false }
-                }
+            .safeAreaInset(edge: .bottom) {
+                Button(action: startPendingDownload) {
+                    Label("开始下载", systemImage: "arrow.down.to.line").frame(maxWidth: .infinity)
+                }.buttonStyle(.borderedProminent).padding()
+                    .disabled(downloader.isDownloading || (!parsedIsEndList && variants.isEmpty))
+                    .background(.regularMaterial)
             }
+            .navigationTitle("视频信息")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { showingVariants = false } } }
         }
     }
 
@@ -418,35 +433,74 @@ struct ContentView: View {
         if candidates.count > 20 { candidates.removeLast(candidates.count - 20) }
     }
 
+    private func loadBrowserAddress() {
+        let raw = browserAddress.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return }
+        let normalized = raw.contains("://") ? raw : "https://" + raw
+        if let url = URL(string: normalized), url.host != nil {
+            browserAddress = url.absoluteString
+            browserController.load(url)
+        } else if let query = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
+                  let url = URL(string: "https://www.google.com/search?q=\(query)") {
+            browserAddress = url.absoluteString
+            browserController.load(url)
+        }
+    }
+
     private func parseDirectURL() {
         let raw = directURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = raw.contains("://") ? raw : "https://" + raw
-        guard let url = URL(string: normalized), url.scheme == "https" || url.scheme == "http" else {
+        guard let url = URL(string: normalized), ["https", "http"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
             errorMessage = "请输入有效的 HTTP 或 HTTPS M3U8 地址。"
             return
         }
-        inspect(url, cookies: [])
+        inspect(url, cookies: [], presentSheet: true)
     }
 
-    private func inspect(_ url: URL, cookies: [HTTPCookie]) {
+    private func inspect(_ url: URL, cookies: [HTTPCookie], presentSheet: Bool = true) {
         pendingURL = url
         pendingCookies = cookies
+        selectedVariantURL = nil
+        variants = []
+        parsedSegmentCount = 0
+        parsedDuration = 0
+        parsedIsEndList = false
         errorMessage = nil
+        isInspecting = true
         Task {
             do {
-                let found = try await downloader.variants(for: url, cookies: cookies)
+                let result = try await downloader.inspectPlaylist(url, cookies: cookies)
                 await MainActor.run {
-                    variants = found
-                    if found.isEmpty {
-                        startDownload(url, cookies: cookies)
-                    } else {
-                        showingVariants = true
-                    }
+                    variants = result.variants
+                    parsedSegmentCount = result.segmentCount
+                    parsedDuration = result.duration
+                    parsedIsEndList = result.isEndList
+                    selectedVariantURL = result.variants.first?.url
+                    isInspecting = false
+                    if presentSheet { showingVariants = true }
                 }
             } catch {
-                await MainActor.run { errorMessage = error.localizedDescription }
+                await MainActor.run { isInspecting = false; errorMessage = error.localizedDescription }
             }
         }
+    }
+
+    private func startPendingDownload() {
+        guard let url = selectedVariantURL ?? pendingURL else { return }
+        showingVariants = false
+        directURL = ""
+        pendingURL = nil
+        selectedVariantURL = nil
+        variants = []
+        startDownload(url, cookies: pendingCookies)
+        pendingCookies = []
+    }
+
+    private func formattedDuration(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds > 0 else { return "未知" }
+        let total = Int(seconds.rounded())
+        let hours = total / 3600, minutes = (total % 3600) / 60, secs = total % 60
+        return hours > 0 ? String(format: "%d:%02d:%02d", hours, minutes, secs) : String(format: "%d:%02d", minutes, secs)
     }
 
     private func startDownload(_ url: URL, cookies: [HTTPCookie]) {

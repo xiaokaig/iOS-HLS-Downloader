@@ -40,3 +40,11 @@ struct HLSPlaylist {
     let mediaSequence: Int
     let isEndList: Bool
 }
+
+
+struct HLSInspection {
+    let variants: [HLSVariant]
+    let segmentCount: Int
+    let duration: Double
+    let isEndList: Bool
+}
