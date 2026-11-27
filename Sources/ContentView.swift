@@ -539,6 +539,7 @@ struct ContentView: View {
         Task {
             do {
                 let result = try await downloader.inspectPlaylist(url, cookies: cookies)
+                guard candidates.contains(where: { candidateKey($0) == key }) else { return }
                 if !result.variants.isEmpty {
                     candidateMetadata[key] = "主播放列表 · \(result.variants.count) 个清晰度"
                     for variant in result.variants {
@@ -550,12 +551,17 @@ struct ContentView: View {
                         candidateMetadata[variantKey] = "\(resolution) · \(bitrate)"
                     }
                 } else if result.segmentCount > 0 {
-                    candidateMetadata[key] = "媒体播放列表 · \(result.segmentCount) 个分片"
-                } else {
+                    if candidateMetadata[key] == nil || candidateMetadata[key] == "正在识别播放列表…" {
+                        candidateMetadata[key] = "媒体播放列表 · \(result.segmentCount) 个分片"
+                    }
+                } else if candidateMetadata[key] == nil || candidateMetadata[key] == "正在识别播放列表…" {
                     candidateMetadata[key] = "播放列表已读取，未发现清晰度信息"
                 }
             } catch {
-                candidateMetadata[key] = "暂时无法读取播放列表"
+                if candidates.contains(where: { candidateKey($0) == key }),
+                   candidateMetadata[key] == nil || candidateMetadata[key] == "正在识别播放列表…" {
+                    candidateMetadata[key] = "暂时无法读取播放列表"
+                }
             }
         }
     }
