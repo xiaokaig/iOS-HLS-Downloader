@@ -139,9 +139,19 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
             return
         }
 
-        let suggested = response.suggestedFilename
+        let rawName = response.suggestedFilename
             ?? downloadTask.originalRequest?.url?.lastPathComponent
-            ?? "video.mp4"
+            ?? "video"
+        let mime = (response.mimeType ?? "").lowercased()
+        let inferredExtension: String
+        switch mime {
+        case "video/webm": inferredExtension = "webm"
+        case "video/quicktime": inferredExtension = "mov"
+        case "video/x-m4v": inferredExtension = "m4v"
+        default: inferredExtension = "mp4"
+        }
+        let suggested = URL(fileURLWithPath: rawName).pathExtension.isEmpty
+            ? rawName + "." + inferredExtension : rawName
         let safeName = Self.safeFilename(suggested)
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         var destination = documents.appendingPathComponent(safeName)
