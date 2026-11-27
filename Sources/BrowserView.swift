@@ -464,7 +464,7 @@ struct BrowserView: UIViewRepresentable {
     final class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandler {
         let controller: BrowserController
         weak var webView: WKWebView?
-        var onCapture: (URL, [HTTPCookie]) -> Void
+        var onCapture: (URL, [HTTPCookie], Bool) -> Void
         var onAddressChange: (String) -> Void
         var isSniffingEnabled: Bool
         var isVideoSniffingEnabled: Bool
