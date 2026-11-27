@@ -6,14 +6,38 @@ final class BrowserController: ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+    @Published private(set) var diagnostic = "尚未开始网页加载"
+    @Published var webViewID = UUID()
     weak var webView: WKWebView?
     private(set) var lastAddress = ""
+    private var navigationStartedAt: Date?
 
-    func load(_ url: URL) { lastAddress = url.absoluteString; webView?.load(URLRequest(url: url)) }
+    func load(_ url: URL) {
+        lastAddress = url.absoluteString
+        navigationStartedAt = Date()
+        diagnostic = "阶段：已发起请求\n地址：\(url.absoluteString)"
+        webView?.load(URLRequest(url: url))
+    }
     func goBack() { webView?.goBack() }
     func goForward() { webView?.goForward() }
     func reload() { webView?.reload() }
     func goHome() { if let url = URL(string: "https://www.google.com") { load(url) } }
+    func rebuildWebView() {
+        webView = nil
+        lastAddress = ""
+        diagnostic = "阶段：正在重建 WKWebView"
+        webViewID = UUID()
+    }
+    func recordStage(_ stage: String, view: WKWebView) {
+        diagnostic = "阶段：\(stage)\n地址：\(view.url?.absoluteString ?? lastAddress)\n加载状态：\(view.isLoading ? "加载中" : "未加载")"
+    }
+    func recordError(_ error: Error, stage: String, view: WKWebView) {
+        let value = error as NSError
+        let elapsed = navigationStartedAt.map { String(format: "%.1f 秒", Date().timeIntervalSince($0)) } ?? "未知"
+        let failedURL = value.userInfo[NSURLErrorFailingURLStringErrorKey] as? String
+        diagnostic = "阶段：\(stage)\n耗时：\(elapsed)\n地址：\(view.url?.absoluteString ?? lastAddress)\n失败地址：\(failedURL ?? "未提供")\n错误域：\(value.domain)\n错误码：\(value.code)\n描述：\(value.localizedDescription)"
+        isLoading = false
+    }
     func update(_ view: WKWebView) {
         canGoBack = view.canGoBack
         canGoForward = view.canGoForward
@@ -127,13 +151,34 @@ struct BrowserView: UIViewRepresentable {
                 DispatchQueue.main.async { self?.onCapture(url, cookies) }
             }
         }
-        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) { controller.update(webView) }
+        func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            controller.recordStage("开始连接 / DNS / TLS", view: webView)
+            controller.update(webView)
+        }
+        func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+            controller.recordStage("收到服务器重定向", view: webView)
+        }
+        func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            controller.recordStage("已收到页面内容，开始提交", view: webView)
+            controller.update(webView)
+        }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            controller.recordStage("加载完成", view: webView)
             controller.update(webView)
             if let url = webView.url { onAddressChange(url.absoluteString) }
         }
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { controller.update(webView) }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { controller.update(webView) }
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            controller.recordError(error, stage: "页面加载失败", view: webView)
+            controller.update(webView)
+        }
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            controller.recordError(error, stage: "连接阶段失败", view: webView)
+            controller.update(webView)
+        }
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            controller.recordStage("WebContent 进程意外终止", view: webView)
+            controller.update(webView)
+        }
     }
 }
 
