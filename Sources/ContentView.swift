@@ -25,6 +25,8 @@ struct ContentView: View {
     @AppStorage("customAdDomains") private var customAdDomains = ""
     @AppStorage("subscribedAdDomains") private var subscribedAdDomains = ""
     @AppStorage("subscribedAdCosmeticRules") private var subscribedAdCosmeticRules = ""
+    @AppStorage("adRulesAutoUpdate") private var adRulesAutoUpdate = "never"
+    @AppStorage("adRulesLastUpdatedAt") private var adRulesLastUpdatedAt = 0.0
     @State private var isRefreshingAdRules = false
     @State private var adRulesStatus = "尚未更新订阅规则"
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
@@ -68,6 +70,7 @@ struct ContentView: View {
         .tint(.blue)
         .onAppear {
             refreshFiles()
+            checkAdRulesAutoUpdate()
             downloadQueue.onCompleted = { url, sourceURL in
                 library.recordDownload(fileURL: url, sourceURL: sourceURL)
                 refreshFiles()
@@ -961,6 +964,11 @@ struct ContentView: View {
                     }
                 }
                 Section("广告规则订阅") {
+                    Picker("自动更新", selection: $adRulesAutoUpdate) {
+                        Text("从不").tag("never")
+                        Text("每天").tag("daily")
+                        Text("每周").tag("weekly")
+                    }
                     Text("订阅 EasyList、EasyList China、CJX's Annoyance、EasyPrivacy、EasyList Warning Removal 和老毛子规则。域名请求规则分批编译，网页元素隐藏规则单独注入；并非所有 ABP 高级语法都能由 WebKit 完整支持。")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
@@ -1307,6 +1315,17 @@ struct ContentView: View {
         }
     }
 
+    private func checkAdRulesAutoUpdate() {
+        let interval: TimeInterval
+        switch adRulesAutoUpdate {
+        case "daily": interval = 24 * 60 * 60
+        case "weekly": interval = 7 * 24 * 60 * 60
+        default: return
+        }
+        guard Date().timeIntervalSince1970 - adRulesLastUpdatedAt >= interval else { return }
+        refreshAdRules()
+    }
+
     private func refreshAdRules() {
         isRefreshingAdRules = true
         adRulesStatus = "正在更新 6 个规则订阅…"
@@ -1370,6 +1389,7 @@ struct ContentView: View {
                 }
                 subscribedAdDomains = domains.sorted().joined(separator: "\n")
                 subscribedAdCosmeticRules = cosmetic.sorted().joined(separator: "\n")
+                adRulesLastUpdatedAt = Date().timeIntervalSince1970
                 browserController.reload()
                 let failedText = failures.isEmpty ? "" : "；失败：\(failures.joined(separator: "、"))"
                 adRulesStatus = "更新完成：\(succeeded)/6 个订阅 · \(domains.count) 域名 · \(cosmetic.count) 元素规则\(failedText)"
