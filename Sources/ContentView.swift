@@ -762,10 +762,6 @@ struct ContentView: View {
                         .disabled(!downloadQueue.items.contains { [.completed, .failed, .cancelled].contains($0.state) })
                     }
 
-                    if let warning = downloader.conversionWarning {
-                        Label(warning, systemImage: "exclamationmark.triangle.fill")
-                            .font(.caption).foregroundStyle(.orange)
-                    }
                     Label("最多 3 个任务并行；HLS 暂停后保留已下载分片，继续时从缓存恢复。切到后台会申请有限执行时间，时间耗尽后自动暂停，回到应用可继续。", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
@@ -1090,23 +1086,6 @@ struct ContentView: View {
                        let raw = http.value(forHTTPHeaderField: "Content-Length"),
                        let value = Int64(raw), value > 0 { bytes = value }
                 } catch {}
-                if bytes <= 0 {
-                    var rangeRequest = URLRequest(url: url)
-                    rangeRequest.httpMethod = "GET"
-                    rangeRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
-                    rangeRequest.timeoutInterval = 12
-                    if let page = currentPageURL { rangeRequest.setValue(page.absoluteString, forHTTPHeaderField: "Referer") }
-                    do {
-                        let (_, response) = try await URLSession.shared.data(for: rangeRequest)
-                        if let http = response as? HTTPURLResponse,
-                           let range = http.value(forHTTPHeaderField: "Content-Range"),
-                           let total = Int64(String(range.split(separator: "/").last ?? "")), total > 0 {
-                            bytes = total
-                        } else if response.expectedContentLength > 1 {
-                            bytes = response.expectedContentLength
-                        }
-                    } catch {}
-                }
                 await MainActor.run {
                     guard candidates.contains(where: { candidateKey($0) == key }) else { return }
                     if bytes > 0 {
