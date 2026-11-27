@@ -56,7 +56,7 @@ struct ContentView: View {
             refreshFiles()
             AppDiagnostics.shared.log("APP", "ContentView appeared")
         }
-        .onChange(of: scenePhase) { _, phase in
+        .onChange(of: scenePhase) { phase in
             AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
         }
         .sheet(isPresented: $showingVariants) {
