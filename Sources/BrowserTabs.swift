@@ -7,7 +7,7 @@ struct BrowserTab: Identifiable {
     var url: String
     var title: String
 
-    init(id: UUID = UUID(), url: String = "", title: String = "起始页", controller: BrowserController = BrowserController()) {
+    init(id: UUID = UUID(), url: String = "", title: String = "起始页", controller: BrowserController) {
         self.id = id
         self.url = url
         self.title = title
@@ -33,11 +33,11 @@ final class BrowserTabManager: ObservableObject {
         let saved = (UserDefaults.standard.data(forKey: storageKey))
             .flatMap { try? JSONDecoder().decode([SavedBrowserTab].self, from: $0) } ?? []
         if saved.isEmpty {
-            let first = BrowserTab()
+            let first = BrowserTab(controller: BrowserController())
             tabs = [first]
             activeTabID = first.id
         } else {
-            tabs = saved.map { BrowserTab(id: $0.id, url: $0.url, title: $0.title) }
+            tabs = saved.map { BrowserTab(id: $0.id, url: $0.url, title: $0.title, controller: BrowserController()) }
             let requested = (UserDefaults.standard.string(forKey: activeKey)).flatMap(UUID.init(uuidString:))
             activeTabID = tabs.first(where: { $0.id == requested })?.id ?? tabs[0].id
         }
@@ -53,7 +53,7 @@ final class BrowserTabManager: ObservableObject {
     @discardableResult
     func addTab(url: URL? = nil, activate: Bool = true) -> UUID {
         let value = url?.absoluteString ?? ""
-        let tab = BrowserTab(url: value, title: url?.host ?? "起始页")
+        let tab = BrowserTab(url: value, title: url?.host ?? "起始页", controller: BrowserController())
         tabs.append(tab)
         if activate { activeTabID = tab.id }
         persist()
@@ -80,7 +80,7 @@ final class BrowserTabManager: ObservableObject {
         tabs[index].controller.dispose()
         tabs.remove(at: index)
         if tabs.isEmpty {
-            let replacement = BrowserTab()
+            let replacement = BrowserTab(controller: BrowserController())
             tabs = [replacement]
             activeTabID = replacement.id
         } else if activeTabID == id {
