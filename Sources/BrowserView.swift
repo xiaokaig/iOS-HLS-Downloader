@@ -242,6 +242,7 @@ struct BrowserView: UIViewRepresentable {
     let onCapture: (URL, [HTTPCookie]) -> Void
     let onAddressChange: (String) -> Void
     let isSniffingEnabled: Bool
+    let isVideoSniffingEnabled: Bool
     let isAdRedirectBlockingEnabled: Bool
     let isPopupBlockingEnabled: Bool
     let customAdDomains: String
@@ -317,12 +318,70 @@ struct BrowserView: UIViewRepresentable {
     })();
     """
 
+    private static let videoSniffingScript = """
+    (() => {
+      if (window.__videoSnifferInstalled) return;
+      window.__videoSnifferInstalled = true;
+      const seen = new Set();
+      const extensions = /\.(?:mp4|m4v|mov|webm)(?:[?#]|$)/i;
+      const notify = (value, mime = "") => {
+        try {
+          const raw = value && value.url ? value.url : value;
+          const url = new URL(String(raw), location.href);
+          if (!/^https?:$/.test(url.protocol) || (!extensions.test(url.href) && !/^video\//i.test(mime))) return;
+          if (/\.(?:ts|m4s)(?:[?#]|$)/i.test(url.href)) return;
+          if (seen.has(url.href)) return;
+          seen.add(url.href);
+          if (seen.size > 300) seen.clear();
+          window.webkit.messageHandlers.video.postMessage(url.href);
+        } catch (_) {}
+      };
+      const originalFetch = window.fetch;
+      window.fetch = function(input, init) {
+        const promise = originalFetch.apply(this, arguments);
+        promise.then(response => notify(response.url || (input && input.url ? input.url : input),
+          response.headers.get('content-type') || '')).catch(() => {});
+        return promise;
+      };
+      const originalOpen = XMLHttpRequest.prototype.open;
+      XMLHttpRequest.prototype.open = function(method, url) {
+        this.__videoURL = url;
+        return originalOpen.apply(this, arguments);
+      };
+      const originalSend = XMLHttpRequest.prototype.send;
+      XMLHttpRequest.prototype.send = function() {
+        this.addEventListener('load', function() {
+          try { notify(this.responseURL || this.__videoURL, this.getResponseHeader('content-type') || ''); }
+          catch (_) {}
+        });
+        return originalSend.apply(this, arguments);
+      };
+      const scan = () => {
+        performance.getEntriesByType('resource').forEach(entry => notify(entry.name));
+        document.querySelectorAll('video,source').forEach(node => {
+          if (node.currentSrc) notify(node.currentSrc);
+          if (node.src) notify(node.src);
+        });
+      };
+      try {
+        new PerformanceObserver(list => list.getEntries().forEach(entry => notify(entry.name)))
+          .observe({entryTypes:['resource']});
+      } catch (_) {}
+      try {
+        new MutationObserver(scan).observe(document.documentElement,
+          {childList:true,subtree:true,attributes:true,attributeFilter:['src']});
+      } catch (_) {}
+      scan();
+    })();
+    """
+
     func makeCoordinator() -> Coordinator {
         Coordinator(
             controller: controller,
             onCapture: onCapture,
             onAddressChange: onAddressChange,
             isSniffingEnabled: isSniffingEnabled,
+            isVideoSniffingEnabled: isVideoSniffingEnabled,
             isAdRedirectBlockingEnabled: isAdRedirectBlockingEnabled,
             isPopupBlockingEnabled: isPopupBlockingEnabled,
             customAdDomains: customAdDomains
@@ -336,7 +395,11 @@ struct BrowserView: UIViewRepresentable {
                 WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
             )
         }
+        if isVideoSniffingEnabled {
+            contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         contentController.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
+        contentController.add(WeakScriptMessageHandler(context.coordinator), name: "video")
 
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
@@ -361,6 +424,7 @@ struct BrowserView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
+        context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
         context.coordinator.customAdDomains = customAdDomains
@@ -371,16 +435,20 @@ struct BrowserView: UIViewRepresentable {
 
         // The address field is presentation state, never a navigation command.
         // All user navigation is routed explicitly through BrowserController.
-        if context.coordinator.isSniffingEnabled != isSniffingEnabled {
+        let sniffingChanged = context.coordinator.isSniffingEnabled != isSniffingEnabled
+        let videoSniffingChanged = context.coordinator.isVideoSniffingEnabled != isVideoSniffingEnabled
+        if sniffingChanged || videoSniffingChanged {
             context.coordinator.isSniffingEnabled = isSniffingEnabled
+            context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
             let contentController = webView.configuration.userContentController
             contentController.removeAllUserScripts()
             if isSniffingEnabled {
-                contentController.addUserScript(
-                    WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-                )
+                contentController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
-            AppDiagnostics.shared.log("HLS", "嗅探开关切换 enabled=\(isSniffingEnabled)")
+            if isVideoSniffingEnabled {
+                contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
+            AppDiagnostics.shared.log("SNIFF", "嗅探开关切换 HLS=\(isSniffingEnabled) 普通视频=\(isVideoSniffingEnabled)")
             if webView.url != nil { webView.reload() }
         }
     }
@@ -400,6 +468,7 @@ struct BrowserView: UIViewRepresentable {
         var onCapture: (URL, [HTTPCookie]) -> Void
         var onAddressChange: (String) -> Void
         var isSniffingEnabled: Bool
+        var isVideoSniffingEnabled: Bool
         var isAdRedirectBlockingEnabled: Bool
         var isPopupBlockingEnabled: Bool
         var customAdDomains: String
@@ -425,6 +494,7 @@ struct BrowserView: UIViewRepresentable {
             onCapture: @escaping (URL, [HTTPCookie]) -> Void,
             onAddressChange: @escaping (String) -> Void,
             isSniffingEnabled: Bool,
+            isVideoSniffingEnabled: Bool,
             isAdRedirectBlockingEnabled: Bool,
             isPopupBlockingEnabled: Bool,
             customAdDomains: String
@@ -433,6 +503,7 @@ struct BrowserView: UIViewRepresentable {
             self.onCapture = onCapture
             self.onAddressChange = onAddressChange
             self.isSniffingEnabled = isSniffingEnabled
+            self.isVideoSniffingEnabled = isVideoSniffingEnabled
             self.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
             self.isPopupBlockingEnabled = isPopupBlockingEnabled
             self.customAdDomains = customAdDomains
@@ -460,10 +531,7 @@ struct BrowserView: UIViewRepresentable {
             return false
         }
 
-        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard message.name == "hls",
-                  let value = message.body as? String,
-                  let url = URL(string: value) else { return }
+        private func capture(_ url: URL) {
             guard let webView else {
                 onCapture(url, [])
                 return
@@ -471,6 +539,13 @@ struct BrowserView: UIViewRepresentable {
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 DispatchQueue.main.async { self?.onCapture(url, cookies) }
             }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard ["hls", "video"].contains(message.name),
+                  let value = message.body as? String,
+                  let url = URL(string: value) else { return }
+            capture(url)
         }
 
         func webView(
@@ -515,7 +590,12 @@ struct BrowserView: UIViewRepresentable {
             decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void
         ) {
             if navigationResponse.isForMainFrame {
-                AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(navigationResponse.response.mimeType ?? "未知") url=\(AppDiagnostics.safeURL(navigationResponse.response.url))")
+                let mime = navigationResponse.response.mimeType ?? "未知"
+                let responseURL = navigationResponse.response.url
+                AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(mime) url=\(AppDiagnostics.safeURL(responseURL))")
+                if isVideoSniffingEnabled, mime.lowercased().hasPrefix("video/"), let responseURL {
+                    capture(responseURL)
+                }
             }
             decisionHandler(.allow)
         }
