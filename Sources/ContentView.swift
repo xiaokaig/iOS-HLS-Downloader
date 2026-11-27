@@ -122,7 +122,7 @@ struct ContentView: View {
                             Image(systemName: "dot.radiowaves.left.and.right")
                             Text(candidates.isEmpty ? "嗅探" : "嗅探 \(candidates.count)").font(.caption.weight(.medium))
                         }
-                        .foregroundStyle(candidates.isEmpty ? .secondary : .blue)
+                        .foregroundStyle(candidates.isEmpty ? Color.secondary : Color.blue)
                         .padding(.horizontal, 12).padding(.vertical, 9)
                         .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
                     }
