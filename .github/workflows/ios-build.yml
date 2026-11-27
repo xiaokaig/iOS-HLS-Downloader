@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   build:
-    runs-on: macos-15-intel
+    runs-on: macos-15
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -41,14 +41,14 @@ jobs:
 
       - name: Build for iPhone (unsigned)
         run: |
-          xcodebuild \\
-            -project HLSDownloader.xcodeproj \\
-            -scheme HLSDownloader \\
-            -configuration Release \\
-            -sdk iphoneos \\
-            -destination 'generic/platform=iOS' \\
-            -derivedDataPath build/DerivedData \\
-            CODE_SIGNING_ALLOWED=NO \\
+          xcodebuild \\\\
+            -project HLSDownloader.xcodeproj \\\\
+            -scheme HLSDownloader \\\\
+            -configuration Release \\\\
+            -sdk iphoneos \\\\
+            -destination 'generic/platform=iOS' \\\\
+            -derivedDataPath build/DerivedData \\\\
+            CODE_SIGNING_ALLOWED=NO \\\\
             build
 
       - name: Verify compiled app icon
