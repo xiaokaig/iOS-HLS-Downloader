@@ -24,6 +24,7 @@ struct ContentView: View {
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
     @AppStorage("subscribedAdDomains") private var subscribedAdDomains = ""
+    @AppStorage("subscribedAdCosmeticRules") private var subscribedAdCosmeticRules = ""
     @State private var isRefreshingAdRules = false
     @State private var adRulesStatus = "尚未更新订阅规则"
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
@@ -170,7 +171,7 @@ struct ContentView: View {
                         isVideoSniffingEnabled: videoSniffingEnabled,
                         isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                         isPopupBlockingEnabled: popupBlockingEnabled,
-                        customAdDomains: customAdDomains + "\n" + subscribedAdDomains,
+                        customAdDomains: customAdDomains + "\n" + subscribedAdDomains + "\n" + subscribedAdCosmeticRules,
                         isDesktopMode: browserDesktopMode,
                         stripMobilePrefix: browserStripMobilePrefix,
                         zoomLevel: browserZoomLevel
@@ -943,16 +944,16 @@ struct ContentView: View {
                         Text("DuckDuckGo").tag("duckduckgo")
                     }
                 }
-                Section("广告域名规则") {
-                    Text("内置规则包含常见广告域名。可在下面逐行添加域名，拦截该域名及其子域名的网页请求。不要填写 https:// 或路径。")
+                Section("ABP 自定义规则") {
+                    Text("支持常用 Adblock Plus 规则：||example.com^ 拦截域名请求；@@||example.com^ 例外规则暂不转换；example.com##.ad 隐藏网页元素。复杂正则和高级选项会按兼容能力处理。")
                         .font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $customAdDomains)
                         .font(.system(.footnote, design: .monospaced))
-                        .frame(minHeight: 110)
+                        .frame(minHeight: 130)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     HStack {
-                        Text("每行一个域名")
+                        Text("每行一条规则")
                             .font(.caption).foregroundStyle(.secondary)
                         Spacer()
                         Button("清空自定义规则", role: .destructive) { customAdDomains = "" }
@@ -960,11 +961,11 @@ struct ContentView: View {
                     }
                 }
                 Section("广告规则订阅") {
-                    Text("订阅 EasyList 的域名规则，并与上方自定义域名一起生效。规则会转换为 WKWebView 内容拦截规则；复杂脚本规则和所有广告形式无法保证全部拦截。")
+                    Text("订阅 EasyList、EasyList China、CJX's Annoyance、EasyPrivacy、EasyList Warning Removal 和老毛子规则。域名请求规则分批编译，网页元素隐藏规则单独注入；并非所有 ABP 高级语法都能由 WebKit 完整支持。")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(subscribedAdDomains.isEmpty ? "未下载订阅规则" : "\(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 个域名规则")
+                            Text(subscribedAdDomains.isEmpty && subscribedAdCosmeticRules.isEmpty ? "未下载订阅规则" : "\(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 个域名 · \(subscribedAdCosmeticRules.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 条元素规则")
                                 .font(.subheadline.weight(.medium))
                             Text(adRulesStatus).font(.caption).foregroundStyle(.secondary)
                         }
@@ -973,12 +974,13 @@ struct ContentView: View {
                             refreshAdRules()
                         } label: {
                             if isRefreshingAdRules { ProgressView() }
-                            else { Label("更新规则", systemImage: "arrow.clockwise") }
+                            else { Label("更新全部", systemImage: "arrow.clockwise") }
                         }.disabled(isRefreshingAdRules)
                     }
-                    if !subscribedAdDomains.isEmpty {
+                    if !subscribedAdDomains.isEmpty || !subscribedAdCosmeticRules.isEmpty {
                         Button("清除订阅规则", role: .destructive) {
                             subscribedAdDomains = ""
+                            subscribedAdCosmeticRules = ""
                             adRulesStatus = "已清除订阅规则"
                         }
                     }
@@ -1307,55 +1309,81 @@ struct ContentView: View {
 
     private func refreshAdRules() {
         isRefreshingAdRules = true
-        adRulesStatus = "正在下载 EasyList…"
+        adRulesStatus = "正在更新 6 个规则订阅…"
         Task {
-            do {
-                guard let url = URL(string: "https://easylist.to/easylist/easylist.txt") else {
-                    throw URLError(.badURL)
-                }
-                var request = URLRequest(url: url)
-                request.timeoutInterval = 45
-                request.setValue("text/plain", forHTTPHeaderField: "Accept")
-                let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
-                      let text = String(data: data, encoding: .utf8) else {
-                    throw URLError(.badServerResponse)
-                }
-                var seen = Set<String>()
-                var domains: [String] = []
-                for rawLine in text.components(separatedBy: .newlines) {
-                    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                    if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") { continue }
-                    var candidates: [String] = []
-                    if line.hasPrefix("||") {
-                        let body = String(line.dropFirst(2))
-                        let host = body.prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" }
-                        candidates.append(String(host))
-                    } else {
-                        let fields = line.split(whereSeparator: { $0.isWhitespace })
-                        if fields.count >= 2 && (fields[0] == "0.0.0.0" || fields[0] == "127.0.0.1") {
-                            candidates.append(contentsOf: fields.dropFirst().map(String.init))
+            let feeds: [(String, String)] = [
+                ("EasyList", "https://easylist.to/easylist/easylist.txt"),
+                ("EasyList China", "https://easylist-downloads.adblockplus.org/easylistchina.txt"),
+                ("CJX's Annoyance", "https://raw.githubusercontent.com/cjx82630/cjxlist/master/cjx-annoyance.txt"),
+                ("EasyList Privacy", "https://easylist.to/easylist/easyprivacy.txt"),
+                ("EasyList Warning Removal", "https://easylist-downloads.adblockplus.org/antiadblockfilters.txt"),
+                ("老毛子", "https://easylist-downloads.adblockplus.org/ruadlist+easylist.txt")
+            ]
+            var domains = Set<String>()
+            var cosmetic = Set<String>()
+            var succeeded = 0
+            var failures: [String] = []
+            for (name, address) in feeds {
+                do {
+                    guard let url = URL(string: address) else { throw URLError(.badURL) }
+                    var request = URLRequest(url: url)
+                    request.timeoutInterval = 45
+                    request.setValue("text/plain", forHTTPHeaderField: "Accept")
+                    let (data, response) = try await URLSession.shared.data(for: request)
+                    guard let http = response as? HTTPURLResponse,
+                          (200..<300).contains(http.statusCode),
+                          let text = String(data: data, encoding: .utf8) else {
+                        throw URLError(.badServerResponse)
+                    }
+                    succeeded += 1
+                    for rawLine in text.components(separatedBy: .newlines) {
+                        let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+                        if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") || line.hasPrefix("@@") { continue }
+                        if line.contains("##"), !line.contains("#@#"), !line.hasPrefix("##") {
+                            cosmetic.insert(line)
+                            continue
+                        }
+                        let normalized = line.lowercased()
+                        if normalized.hasPrefix("||") {
+                            let body = String(normalized.dropFirst(2))
+                            let host = String(body.prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" && $0 != "|" })
+                            if Self.isValidAdDomain(host) { domains.insert(host) }
+                        } else {
+                            let fields = normalized.split(whereSeparator: { $0.isWhitespace })
+                            if fields.count >= 2 && (fields[0] == "0.0.0.0" || fields[0] == "127.0.0.1") {
+                                for field in fields.dropFirst() {
+                                    let host = String(field)
+                                    if Self.isValidAdDomain(host) { domains.insert(host) }
+                                }
+                            }
                         }
                     }
-                    for domain in candidates where domain.range(of: "^[a-z0-9.-]+$", options: .regularExpression) != nil && domain.contains(".") {
-                        if seen.insert(domain).inserted { domains.append(domain) }
-                        if domains.count >= 1200 { break }
-                    }
-                    if domains.count >= 1200 { break }
-                }
-                guard !domains.isEmpty else { throw URLError(.cannotParseResponse) }
-                await MainActor.run {
-                    subscribedAdDomains = domains.joined(separator: "\n")
-                    browserController.reload()
-                    adRulesStatus = "更新完成 · \(Date().formatted(date: .numeric, time: .shortened))"
-                    isRefreshingAdRules = false
-                }
-            } catch {
-                await MainActor.run {
-                    adRulesStatus = "更新失败：\(error.localizedDescription)"
-                    isRefreshingAdRules = false
+                } catch {
+                    failures.append(name)
                 }
             }
+            await MainActor.run {
+                guard succeeded > 0, !domains.isEmpty || !cosmetic.isEmpty else {
+                    adRulesStatus = "更新失败：所有订阅均不可用"
+                    isRefreshingAdRules = false
+                    return
+                }
+                subscribedAdDomains = domains.sorted().joined(separator: "\n")
+                subscribedAdCosmeticRules = cosmetic.sorted().joined(separator: "\n")
+                browserController.reload()
+                let failedText = failures.isEmpty ? "" : "；失败：\(failures.joined(separator: "、"))"
+                adRulesStatus = "更新完成：\(succeeded)/6 个订阅 · \(domains.count) 域名 · \(cosmetic.count) 元素规则\(failedText)"
+                isRefreshingAdRules = false
+            }
+        }
+    }
+
+    private static func isValidAdDomain(_ domain: String) -> Bool {
+        guard domain.utf8.count <= 253, domain.contains(".") else { return false }
+        let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
+        return labels.count >= 2 && labels.allSatisfy { label in
+            label.utf8.count <= 63 &&
+            label.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"#, options: .regularExpression) != nil
         }
     }
 
