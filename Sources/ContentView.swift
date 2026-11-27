@@ -1413,7 +1413,7 @@ struct ContentView: View {
                 )
                 alistDirectories = result
             } catch {
-                errorMessage = "读取 AList 目录失败：\\(error.localizedDescription)"
+                errorMessage = "读取 AList 目录失败：\(error.localizedDescription)"
             }
             isLoadingAListDirectories = false
         }
