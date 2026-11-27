@@ -2,6 +2,12 @@ import Foundation
 import Combine
 import Security
 
+
+struct AListDirectory: Identifiable, Hashable {
+    let name: String
+    var id: String { name }
+}
+
 enum AListUploadError: LocalizedError {
     case invalidServer
     case invalidCredentials
@@ -90,6 +96,51 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionUploadDele
             password: password,
             otpCode: otpCode
         )
+    }
+
+    func listDirectories(
+        serverAddress: String,
+        username: String,
+        password: String,
+        otpCode: String,
+        directory: String
+    ) async throws -> [AListDirectory] {
+        let token = try await login(
+            serverAddress: serverAddress,
+            username: username,
+            password: password,
+            otpCode: otpCode
+        )
+        let endpoint = try makeEndpoint(serverAddress: serverAddress, path: "api/fs/list")
+        var request = URLRequest(url: endpoint)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 30
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(token, forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "path": directory.isEmpty ? "/" : directory,
+            "password": "",
+            "page": 1,
+            "per_page": 200,
+            "refresh": false
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            throw AListUploadError.invalidResponse
+        }
+        let code = object["code"] as? Int ?? 0
+        guard code == 200 else {
+            throw AListUploadError.server(object["message"] as? String ?? "读取 AList 目录失败")
+        }
+        let payload = object["data"] as? [String: Any]
+        let entries = payload?["content"] as? [[String: Any]] ?? []
+        return entries.compactMap { entry in
+            guard (entry["is_dir"] as? Bool) == true,
+                  let name = entry["name"] as? String, !name.isEmpty else { return nil }
+            return AListDirectory(name: name)
+        }.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
     }
 
     func upload(
