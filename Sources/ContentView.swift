@@ -152,7 +152,7 @@ struct ContentView: View {
                         isVideoSniffingEnabled: videoSniffingEnabled,
                         isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                         isPopupBlockingEnabled: popupBlockingEnabled,
-                        customAdDomains: customAdDomains + "\\n" + subscribedAdDomains,
+                        customAdDomains: customAdDomains + "\n" + subscribedAdDomains,
                         isDesktopMode: browserDesktopMode
                     )
                     .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
@@ -1174,7 +1174,8 @@ struct ContentView: View {
                 }
                 guard !domains.isEmpty else { throw URLError(.cannotParseResponse) }
                 await MainActor.run {
-                    subscribedAdDomains = domains.joined(separator: "\\n")
+                    subscribedAdDomains = domains.joined(separator: "\n")
+                    browserController.reload()
                     adRulesStatus = "更新完成 · \(Date().formatted(date: .numeric, time: .shortened))"
                     isRefreshingAdRules = false
                 }
