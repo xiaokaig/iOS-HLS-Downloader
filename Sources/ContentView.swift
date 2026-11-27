@@ -980,7 +980,7 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(subscribedAdDomains.isEmpty && subscribedAdCosmeticRules.isEmpty ? "未下载订阅规则" : "\(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 个域名 · \(subscribedAdCosmeticRules.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 条元素规则")
                                 .font(.subheadline.weight(.medium))
-                            Text(adRulesStatus + " · 未转换规则：\\(adRulesSkippedCount)").font(.caption).foregroundStyle(.secondary)
+                            Text(adRulesStatus + " · 未转换规则：\(adRulesSkippedCount)").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button {
