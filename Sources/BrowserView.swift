@@ -92,6 +92,7 @@ final class BrowserController: ObservableObject {
     }
     func recordStage(_ stage: String, view: WKWebView) {
         diagnostic = "阶段：\(stage)\n地址：\(view.url?.absoluteString ?? lastAddress)\n加载状态：\(view.isLoading ? "加载中" : "未加载")"
+        AppDiagnostics.shared.log("WEBKIT", "\(stage) url=\(AppDiagnostics.safeURL(view.url)) loading=\(view.isLoading) title=\(view.title ?? "")")
     }
     func recordError(_ error: Error, stage: String, view: WKWebView) {
         let value = error as NSError
@@ -217,7 +218,7 @@ struct BrowserView: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             let request = navigationAction.request
             let type = navigationAction.navigationType.rawValue
-            AppDiagnostics.shared.log("REQUEST", "action type=\(type) mainFrame=\\(navigationAction.targetFrame?.isMainFrame.description ?? "nil") method=\\(request.httpMethod ?? "GET") url=\\(AppDiagnostics.safeURL(request.url))")
+            AppDiagnostics.shared.log("REQUEST", "action type=\(type) mainFrame=\(navigationAction.targetFrame?.isMainFrame.description ?? "nil") method=\(request.httpMethod ?? "GET") url=\(AppDiagnostics.safeURL(request.url))")
             decisionHandler(.allow)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
@@ -226,28 +227,28 @@ struct BrowserView: UIViewRepresentable {
                     let key = String(describing: pair.key)
                     if !["set-cookie", "authorization", "www-authenticate"].contains(key.lowercased()) { result[key] = String(describing: pair.value) }
                 }
-                AppDiagnostics.shared.log("RESPONSE", "status=\\(response.statusCode) mime=\\(response.mimeType ?? "nil") expectedLength=\\(response.expectedContentLength) mainFrame=\\(navigationResponse.isForMainFrame) url=\\(AppDiagnostics.safeURL(response.url)) headers=\\(headers)")
+                AppDiagnostics.shared.log("RESPONSE", "status=\(response.statusCode) mime=\(response.mimeType ?? "nil") expectedLength=\(response.expectedContentLength) mainFrame=\(navigationResponse.isForMainFrame) url=\(AppDiagnostics.safeURL(response.url)) headers=\(headers)")
             } else {
-                AppDiagnostics.shared.log("RESPONSE", "non-HTTP response mainFrame=\\(navigationResponse.isForMainFrame) url=\\(AppDiagnostics.safeURL(navigationResponse.response.url))")
+                AppDiagnostics.shared.log("RESPONSE", "non-HTTP response mainFrame=\(navigationResponse.isForMainFrame) url=\(AppDiagnostics.safeURL(navigationResponse.response.url))")
             }
             decisionHandler(.allow)
         }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
-            AppDiagnostics.shared.log("NAV", "didStartProvisionalNavigation url=\\(AppDiagnostics.safeURL(webView.url))")
+            AppDiagnostics.shared.log("NAV", "didStartProvisionalNavigation url=\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("开始连接 / DNS / TLS", view: webView)
             controller.update(webView)
         }
         func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
-            AppDiagnostics.shared.log("NAV", "服务器重定向 currentURL=\\(AppDiagnostics.safeURL(webView.url))")
+            AppDiagnostics.shared.log("NAV", "服务器重定向 currentURL=\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("收到服务器重定向", view: webView)
         }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
-            AppDiagnostics.shared.log("NAV", "didCommit url=\\(AppDiagnostics.safeURL(webView.url))")
+            AppDiagnostics.shared.log("NAV", "didCommit url=\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("已收到页面内容，开始提交", view: webView)
             controller.update(webView)
         }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            AppDiagnostics.shared.log("NAV", "didFinish url=\\(AppDiagnostics.safeURL(webView.url)) title=\\(webView.title ?? "")")
+            AppDiagnostics.shared.log("NAV", "didFinish url=\(AppDiagnostics.safeURL(webView.url)) title=\(webView.title ?? "")")
             controller.recordStage("加载完成", view: webView)
             controller.update(webView)
             if let url = webView.url { onAddressChange(url.absoluteString) }
@@ -261,7 +262,7 @@ struct BrowserView: UIViewRepresentable {
             controller.update(webView)
         }
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-            AppDiagnostics.shared.log("WEBKIT", "WebContent 进程意外终止 url=\\(AppDiagnostics.safeURL(webView.url))")
+            AppDiagnostics.shared.log("WEBKIT", "WebContent 进程意外终止 url=\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("WebContent 进程意外终止", view: webView)
             controller.update(webView)
         }
