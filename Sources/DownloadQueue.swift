@@ -275,11 +275,17 @@ final class DownloadQueueManager: ObservableObject {
         for item in items where item.state == .downloading {
             item.state = .paused
             item.status = "系统后台时间到期，已暂停"
-            item.directManager?.pause()
-            item.runner?.cancel()
+            if let direct = item.directManager {
+                direct.pause()
+                activeIDs.remove(item.id)
+            } else {
+                item.runner?.cancel()
+            }
         }
-        activeIDs.removeAll()
-        finishBackgroundTaskIfIdle()
+        if backgroundTaskID != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTaskID)
+            backgroundTaskID = .invalid
+        }
         objectWillChange.send()
     }
 
