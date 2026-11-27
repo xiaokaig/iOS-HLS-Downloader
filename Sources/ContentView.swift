@@ -9,9 +9,7 @@ struct ContentView: View {
     @StateObject private var directDownloader = DirectVideoDownloadManager()
     @StateObject private var library = BrowserLibraryStore()
     @StateObject private var browserController = BrowserController()
-    @State private var selectedTab = 0
     @State private var showingBrowserMenu = false
-    @State private var showingMoreMenu = false
     @State private var showingTabOverview = false
     @AppStorage("browserDesktopMode") private var browserDesktopMode = false
     @AppStorage("browserStripMobilePrefix") private var browserStripMobilePrefix = false
@@ -51,15 +49,7 @@ struct ContentView: View {
     @State private var directDownloadSourceURL: URL?
 
     var body: some View {
-        TabView(selection: $selectedTab) {
-            browserTab
-                .tabItem { Label("浏览器", systemImage: "safari") }
-                .tag(0)
-
-            moreTab
-                .tabItem { Label("更多", systemImage: "ellipsis.circle") }
-                .tag(1)
-        }
+        browserTab
         .tint(.blue)
         .onAppear {
             refreshFiles()
@@ -300,13 +290,15 @@ struct ContentView: View {
                         Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
                     }
                 }
-                Section("页面操作") {
+                Section("App 功能") {\n                    NavigationLink { downloadsTab } label: { Label("下载管理", systemImage: "arrow.down.circle") }\n                    NavigationLink { filesTab } label: { Label("文件管理", systemImage: "folder") }\n                    NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }\n                }\n                Section("页面操作") {
                     menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
                     menuAction("复制当前网址", icon: "doc.on.doc") {
                         if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
                         showingBrowserMenu = false
                     }
-                    menuAction("更多功能与设置", icon: "ellipsis.circle") { showingBrowserMenu = false; selectedTab = 1 }
+                    NavigationLink { downloadsTab } label: { Label("下载管理", systemImage: "arrow.down.circle") }
+                    NavigationLink { filesTab } label: { Label("文件管理", systemImage: "folder") }
+                    NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
                 }
             }
             .listStyle(.insetGrouped)
@@ -465,7 +457,10 @@ struct ContentView: View {
 
     private func browserTool(_ symbol: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(width: 42, height: 38)
+            Image(systemName: symbol)
+                .font(.system(size: 19, weight: .medium))
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .contentShape(Rectangle())
         }
         .foregroundStyle(disabled ? .tertiary : .primary).disabled(disabled)
     }
@@ -960,7 +955,7 @@ struct ContentView: View {
         }
         directDownloadSourceURL = url
         directDownloader.start(url: url, cookies: cookies, referrer: currentPageURL)
-        selectedTab = 1
+        showingBrowserMenu = true
     }
 
     private func formattedFileDate(_ url: URL) -> String {
