@@ -170,6 +170,7 @@ final class HLSDownloadManager: ObservableObject {
         status = "后台按顺序组装视频…"
         var lastMap: HLSMap?
         for (index, segment) in mediaPlaylist.segments.enumerated() {
+            try Task.checkCancellation()
             if let map = segment.map, map != lastMap {
                 let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange, cookies: cookies)
                 defer { try? FileManager.default.removeItem(at: mapTemp.fileURL) }
@@ -276,6 +277,7 @@ final class HLSDownloadManager: ObservableObject {
 
         var lastError: Error = HLSDownloadError.invalidResponse
         for attempt in 1...3 {
+            try Task.checkCancellation()
             do {
                 let temp = try await fetchTemporaryFile(segment.url, range: segment.byteRange, cookies: cookies)
                 try? FileManager.default.removeItem(at: destination)
@@ -283,6 +285,7 @@ final class HLSDownloadManager: ObservableObject {
                 try String(temp.statusCode).write(to: statusFile, atomically: true, encoding: .utf8)
                 return (index, temp.statusCode)
             } catch {
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
                 lastError = error
                 if attempt < 3 {
                     try await Task.sleep(for: .seconds(attempt))
