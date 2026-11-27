@@ -478,6 +478,10 @@ struct BrowserView: UIViewRepresentable {
         // unsupported. Compile as a whole first, then bisect failed batches so a
         // malformed custom domain cannot disable every valid ad rule.
         func compile(_ subset: [String], completion: @escaping ([WKContentRuleList]) -> Void) {
+            guard coordinator.adRulesSignature == signature else {
+                completion([])
+                return
+            }
             guard !subset.isEmpty else {
                 completion([])
                 return
