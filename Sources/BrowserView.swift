@@ -113,6 +113,7 @@ final class BrowserController: ObservableObject {
     @Published private(set) var estimatedProgress = 0.0
     @Published private(set) var showsNavigationProgress = false
     @Published private(set) var diagnostic = "等待输入网址"
+    @Published private(set) var isShowingStartPage = true
     @Published var webViewID = UUID()
 
     var webView: WKWebView?
@@ -155,6 +156,7 @@ final class BrowserController: ObservableObject {
         }
 
         requestedKey = key
+        isShowingStartPage = false
         navigationStartedAt = Date()
         estimatedProgress = 0.03
         showsNavigationProgress = true
@@ -197,8 +199,14 @@ final class BrowserController: ObservableObject {
     }
 
     func showStartPage() {
-        guard let webView else { return }
+        guard let webView else {
+            isShowingStartPage = true
+            diagnostic = "阶段：显示起始页（WebView 尚未创建）"
+            return
+        }
+        webView.stopLoading()
         requestedKey = nil
+        isShowingStartPage = true
         navigationStartedAt = Date()
         estimatedProgress = 0.03
         showsNavigationProgress = true
