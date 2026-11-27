@@ -27,12 +27,9 @@ struct BrowserView: UIViewRepresentable {
     @ObservedObject var controller: BrowserController
     let onCapture: (URL, [HTTPCookie]) -> Void
     let onAddressChange: (String) -> Void
+    let isSniffingEnabled: Bool
 
-    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, onCapture: onCapture, onAddressChange: onAddressChange) }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let userController = WKUserContentController()
-        let script = """
+    private static let sniffingScript = """
         (() => {
           const notify = value => {
             try {
@@ -76,8 +73,16 @@ struct BrowserView: UIViewRepresentable {
           new MutationObserver(scan).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
           scan();
         })();
-        """
-        userController.addUserScript(WKUserScript(source: script, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+   
+
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller, onCapture: onCapture, onAddressChange: onAddressChange, isSniffingEnabled: isSniffingEnabled) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let userController = WKUserContentController()
+
+        if isSniffingEnabled {
+            userController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         userController.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = userController
@@ -93,6 +98,15 @@ struct BrowserView: UIViewRepresentable {
     func updateUIView(_ webView: WKWebView, context: Context) {
         context.coordinator.onCapture = onCapture
         context.coordinator.onAddressChange = onAddressChange
+        if context.coordinator.isSniffingEnabled != isSniffingEnabled {
+            context.coordinator.isSniffingEnabled = isSniffingEnabled
+            let userController = webView.configuration.userContentController
+            userController.removeAllUserScripts()
+            if isSniffingEnabled {
+                userController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
+            webView.reload()
+        }
         if controller.webView !== webView { controller.webView = webView }
         if controller.lastAddress != address, let url = URL(string: address), url.host != nil { controller.load(url) }
     }
@@ -102,8 +116,9 @@ struct BrowserView: UIViewRepresentable {
         weak var webView: WKWebView?
         var onCapture: (URL, [HTTPCookie]) -> Void
         var onAddressChange: (String) -> Void
-        init(controller: BrowserController, onCapture: @escaping (URL,[HTTPCookie])->Void, onAddressChange: @escaping (String)->Void) {
-            self.controller = controller; self.onCapture = onCapture; self.onAddressChange = onAddressChange
+        var isSniffingEnabled: Bool
+        init(controller: BrowserController, onCapture: @escaping (URL,[HTTPCookie])->Void, onAddressChange: @escaping (String)->Void, isSniffingEnabled: Bool) {
+            self.controller = controller; self.onCapture = onCapture; self.onAddressChange = onAddressChange; self.isSniffingEnabled = isSniffingEnabled
         }
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             guard let value = message.body as? String, let url = URL(string: value) else { return }
