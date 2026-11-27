@@ -27,6 +27,7 @@ struct ContentView: View {
     @AppStorage("subscribedAdCosmeticRules") private var subscribedAdCosmeticRules = ""
     @AppStorage("adRulesAutoUpdate") private var adRulesAutoUpdate = "never"
     @AppStorage("adRulesLastUpdatedAt") private var adRulesLastUpdatedAt = 0.0
+    @AppStorage("adRulesSkippedCount") private var adRulesSkippedCount = 0
     @State private var isRefreshingAdRules = false
     @State private var adRulesStatus = "尚未更新订阅规则"
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
@@ -979,7 +980,7 @@ struct ContentView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             Text(subscribedAdDomains.isEmpty && subscribedAdCosmeticRules.isEmpty ? "未下载订阅规则" : "\(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 个域名 · \(subscribedAdCosmeticRules.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 条元素规则")
                                 .font(.subheadline.weight(.medium))
-                            Text(adRulesStatus).font(.caption).foregroundStyle(.secondary)
+                            Text(adRulesStatus + " · 未转换规则：\\(adRulesSkippedCount)").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
                         Button {
@@ -1338,14 +1339,15 @@ struct ContentView: View {
                 ("EasyList", "https://easylist.to/easylist/easylist.txt"),
                 ("EasyList China", "https://easylist-downloads.adblockplus.org/easylistchina.txt"),
                 ("CJX's Annoyance", "https://raw.githubusercontent.com/cjx82630/cjxlist/master/cjx-annoyance.txt"),
-                ("EasyList Privacy", "https://easylist.to/easylist/easyprivacy.txt"),
-                ("EasyList Warning Removal", "https://easylist-downloads.adblockplus.org/antiadblockfilters.txt"),
+                ("EasyList Privacy", "https://easylist-downloads.adblockplus.org/easyprivacy.txt"),
+                ("EasyList Warning Removal", "https://easylist-msie.adblockplus.org/antiadblockfilters.txt"),
                 ("老毛子", "https://easylist-downloads.adblockplus.org/ruadlist+easylist.txt")
             ]
             var domains = Set<String>()
             var cosmetic = Set<String>()
             var succeeded = 0
             var failures: [String] = []
+            var skipped = 0
             for (name, address) in feeds {
                 do {
                     guard let url = URL(string: address) else { throw URLError(.badURL) }
@@ -1361,7 +1363,8 @@ struct ContentView: View {
                     succeeded += 1
                     for rawLine in text.components(separatedBy: .newlines) {
                         let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-                        if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") || line.hasPrefix("@@") { continue }
+                        if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") { continue }
+                        if line.hasPrefix("@@") { skipped += 1; continue }
                         if line.contains("##"), !line.contains("#@#"), !line.hasPrefix("##") {
                             cosmetic.insert(line)
                             continue
@@ -1370,14 +1373,18 @@ struct ContentView: View {
                         if normalized.hasPrefix("||") {
                             let body = String(normalized.dropFirst(2))
                             let host = String(body.prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" && $0 != "|" })
-                            if Self.isValidAdDomain(host) { domains.insert(host) }
+                            if Self.isValidAdDomain(host) { domains.insert(host) } else { skipped += 1 }
                         } else {
                             let fields = normalized.split(whereSeparator: { $0.isWhitespace })
                             if fields.count >= 2 && (fields[0] == "0.0.0.0" || fields[0] == "127.0.0.1") {
+                                var accepted = 0
                                 for field in fields.dropFirst() {
                                     let host = String(field)
-                                    if Self.isValidAdDomain(host) { domains.insert(host) }
+                                    if Self.isValidAdDomain(host) { domains.insert(host); accepted += 1 }
                                 }
+                                if accepted == 0 { skipped += 1 }
+                            } else {
+                                skipped += 1
                             }
                         }
                     }
@@ -1391,11 +1398,16 @@ struct ContentView: View {
                     isRefreshingAdRules = false
                     return
                 }
+                if !failures.isEmpty {
+                    domains.formUnion(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty })
+                    cosmetic.formUnion(subscribedAdCosmeticRules.components(separatedBy: .newlines).filter { !$0.isEmpty })
+                }
                 subscribedAdDomains = domains.sorted().joined(separator: "\n")
                 subscribedAdCosmeticRules = cosmetic.sorted().joined(separator: "\n")
+                adRulesSkippedCount = skipped
                 adRulesLastUpdatedAt = Date().timeIntervalSince1970
                 browserController.reload()
-                let failedText = failures.isEmpty ? "" : "；失败：\(failures.joined(separator: "、"))"
+                let failedText = failures.isEmpty ? "" : "；失败：\(failures.joined(separator: "、"))（已保留旧规则）"
                 adRulesStatus = "更新完成：\(succeeded)/6 个订阅 · \(domains.count) 域名 · \(cosmetic.count) 元素规则\(failedText)"
                 isRefreshingAdRules = false
             }
