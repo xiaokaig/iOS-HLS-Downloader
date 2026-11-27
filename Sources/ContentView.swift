@@ -14,6 +14,7 @@ struct ContentView: View {
     @State private var showingDownloads = false
     @State private var showingFiles = false
     @State private var showingTabOverview = false
+    @State private var tabPreviews: [UUID: UIImage] = [:]
     @AppStorage("browserDesktopMode") private var browserDesktopMode = false
     @AppStorage("browserStripMobilePrefix") private var browserStripMobilePrefix = false
     @AppStorage("browserZoomLevel") private var browserZoomLevel = 1.0
@@ -188,7 +189,7 @@ struct ContentView: View {
                     browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
                     browserTool("house") { openHomePage() }
-                    Button { showingTabOverview = true } label: {
+                    Button { captureTabPreviews(); showingTabOverview = true } label: {
                         ZStack(alignment: .topTrailing) {
                             Image(systemName: "square.on.square")
                                 .font(.system(size: 19, weight: .medium))
@@ -430,16 +431,26 @@ struct ContentView: View {
                     ForEach(tabManager.tabs) { tab in
                         VStack(alignment: .leading, spacing: 9) {
                             ZStack(alignment: .topTrailing) {
-                                RoundedRectangle(cornerRadius: 12)
-                                    .fill(Color(uiColor: .secondarySystemGroupedBackground))
-                                    .frame(height: 112)
-                                    .overlay {
-                                        VStack(spacing: 7) {
-                                            Image(systemName: "safari").font(.system(size: 28)).foregroundStyle(.secondary)
-                                            Text(tab.url.isEmpty ? "起始页" : (URL(string: tab.url)?.host ?? tab.url))
-                                                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                                        }.padding(.horizontal, 8)
-                                    }
+                                if let preview = tabPreviews[tab.id] {
+                                    Image(uiImage: preview)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 112)
+                                        .clipped()
+                                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                                } else {
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .fill(Color(uiColor: .secondarySystemGroupedBackground))
+                                        .frame(height: 112)
+                                        .overlay {
+                                            VStack(spacing: 7) {
+                                                Image(systemName: "safari").font(.system(size: 28)).foregroundStyle(.secondary)
+                                                Text(tab.url.isEmpty ? "起始页" : (URL(string: tab.url)?.host ?? tab.url))
+                                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            }.padding(.horizontal, 8)
+                                        }
+                                }
                                 Button {
                                     tabManager.close(tab.id)
                                 } label: {
@@ -465,6 +476,9 @@ struct ContentView: View {
                             Button("关闭标签页", role: .destructive) { tabManager.close(tab.id) }
                             Button("关闭其他标签页") { tabManager.closeOthers(keeping: tab.id) }
                         }
+                        .gesture(DragGesture(minimumDistance: 30).onEnded { value in
+                            if abs(value.translation.width) > 80 { tabManager.close(tab.id) }
+                        })
                     }
                     Button {
                         tabManager.addTab()
@@ -484,6 +498,16 @@ struct ContentView: View {
             .navigationTitle("标签页（\(tabManager.tabs.count)）")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { showingTabOverview = false } } }
+        }
+    }
+
+    private func captureTabPreviews() {
+        for tab in tabManager.tabs {
+            guard let webView = tab.controller.webView else { continue }
+            webView.takeSnapshot(with: nil) { image, _ in
+                guard let image else { return }
+                DispatchQueue.main.async { tabPreviews[tab.id] = image }
+            }
         }
     }
 
