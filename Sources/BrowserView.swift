@@ -859,10 +859,15 @@ struct BrowserView: UIViewRepresentable {
 
         private func isBlockedAdDomain(_ host: String) -> Bool {
             let normalizedHost = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
-            let custom = customAdDomains
-                .components(separatedBy: .newlines)
-                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-                .filter { !$0.isEmpty && !$0.contains("/") && !$0.contains(":") && !$0.contains(" ") }
+            let custom = customAdDomains.components(separatedBy: .newlines).compactMap { raw -> String? in
+                let line = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                guard !line.isEmpty, !line.hasPrefix("@@"), !line.contains("##") else { return nil }
+                if line.hasPrefix("||") {
+                    let body = String(line.dropFirst(2))
+                    return String(body.prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" && $0 != "|" })
+                }
+                return line.contains("/") || line.contains(":") || line.contains(" ") ? nil : line
+            }
             let domains = Self.builtInAdDomains.union(custom)
             return domains.contains { normalizedHost == $0 || normalizedHost.hasSuffix("." + $0) }
         }
