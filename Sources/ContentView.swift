@@ -15,12 +15,13 @@ struct ContentView: View {
     @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
+    @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
     @State private var showingBookmarks = false
 
     // Browser
-    @State private var browserAddress = "https://"
+    @State private var browserAddress = ""
     @State private var candidates: [URL] = []
     @State private var candidateCookies: [String: [HTTPCookie]] = [:]
     @State private var candidateMetadata: [String: String] = [:]
@@ -103,7 +104,7 @@ struct ContentView: View {
             VStack(spacing: 0) {
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("搜索或输入网址", text: $browserAddress)
+                    TextField("主页 · 搜索或输入网址", text: $browserAddress)
                         .keyboardType(.URL).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().submitLabel(.go).onSubmit(loadBrowserAddress)
                     if browserController.isLoading { ProgressView().controlSize(.small) }
@@ -133,7 +134,7 @@ struct ContentView: View {
                                 isPopupBlockingEnabled: popupBlockingEnabled,
                                 customAdDomains: customAdDomains)
                         .id(browserController.webViewID)
-                    if browserAddress == "https://" || browserAddress.isEmpty {
+                    if browserAddress.isEmpty {
                         VStack(spacing: 24) {
                             Spacer()
                             VStack(spacing: 8) {
@@ -156,7 +157,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
-                    browserTool("house") { browserAddress = "https://www.google.com/"; browserController.goHome() }
+                    browserTool("house") { browserAddress = ""; browserController.goHome() }
                     Spacer(minLength: 8)
                     browserLibraryTool("历史", symbol: "clock.arrow.circlepath") { showingBrowsingHistory = true }
                     browserLibraryTool("书签", symbol: "bookmark") { showingBookmarks = true }
@@ -586,6 +587,14 @@ struct ContentView: View {
                     Text("阻止网页通过 window.open 或新窗口链接打开页面。默认关闭。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section("地址栏与搜索") {
+                    Picker("默认搜索引擎", selection: $defaultSearchEngine) {
+                        Text("必应").tag("bing")
+                        Text("百度").tag("baidu")
+                        Text("Google").tag("google")
+                        Text("DuckDuckGo").tag("duckduckgo")
+                    }
+                }
                 Section("广告域名规则") {
                     Text("内置规则包含常见广告跳转域名。可在下面逐行添加域名，仅拦截该域名及其子域名。不要填写 https:// 或路径。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -801,12 +810,23 @@ struct ContentView: View {
     private func loadBrowserAddress() {
         let raw = browserAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
+        let hasWhitespace = raw.rangeOfCharacter(from: .whitespacesAndNewlines) != nil
         let normalized = raw.contains("://") ? raw : "https://" + raw
-        if let url = URL(string: normalized), url.host != nil {
+        if !hasWhitespace, let url = URL(string: normalized),
+           let host = url.host, host.contains("."), !host.hasPrefix(".") {
             browserAddress = url.absoluteString
             browserController.load(url)
-        } else if let query = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-                  let url = URL(string: "https://www.google.com/search?q=\(query)") {
+            return
+        }
+        let query = raw.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? raw
+        let prefix: String
+        switch defaultSearchEngine {
+        case "baidu": prefix = "https://www.baidu.com/s?wd="
+        case "google": prefix = "https://www.google.com/search?q="
+        case "duckduckgo": prefix = "https://duckduckgo.com/?q="
+        default: prefix = "https://www.bing.com/search?q="
+        }
+        if let url = URL(string: prefix + query) {
             browserAddress = url.absoluteString
             browserController.load(url)
         }
