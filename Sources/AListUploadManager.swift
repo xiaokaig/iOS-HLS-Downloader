@@ -10,7 +10,8 @@ struct AListDirectory: Identifiable, Hashable {
 
 enum AListUploadError: LocalizedError {
     case invalidServer
-    case invalidCredentials
+    case usernameEmpty
+    case passwordEmpty
     case invalidResponse
     case server(String)
     case fileUnavailable
@@ -19,7 +20,8 @@ enum AListUploadError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .invalidServer: return "AList 地址无效，请填写完整的 HTTP 或 HTTPS 地址。"
-        case .invalidCredentials: return "AList 登录失败，请检查账号、密码或二步验证码。"
+        case .usernameEmpty: return "AList 用户名为空：请检查用户名是否只包含空格。"
+        case .passwordEmpty: return "AList 密码为空：请重新输入密码。"
         case .invalidResponse: return "AList 返回了无法识别的响应。"
         case .server(let message): return message
         case .fileUnavailable: return "本地文件不存在或无法读取。"
@@ -277,12 +279,15 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionTaskDelega
         password: String,
         otpCode: String
     ) async throws -> String {
-        guard !username.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !password.isEmpty else {
-            throw AListUploadError.invalidCredentials
+        let normalizedUsername = username.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalizedUsername.isEmpty else {
+            throw AListUploadError.usernameEmpty
+        }
+        guard !password.isEmpty else {
+            throw AListUploadError.passwordEmpty
         }
         let endpoint = try makeEndpoint(serverAddress: serverAddress, path: "api/auth/login")
-        var body: [String: String] = ["username": username, "password": password]
+        var body: [String: String] = ["username": normalizedUsername, "password": password]
         let otp = otpCode.trimmingCharacters(in: .whitespacesAndNewlines)
         if !otp.isEmpty { body["otp_code"] = otp }
 
