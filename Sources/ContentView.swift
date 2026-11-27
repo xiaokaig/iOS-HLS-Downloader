@@ -290,7 +290,9 @@ struct ContentView: View {
                         Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
                     }
                 }
-                Section("App 功能") {\n                    NavigationLink { downloadsTab } label: { Label("下载管理", systemImage: "arrow.down.circle") }\n                    NavigationLink { filesTab } label: { Label("文件管理", systemImage: "folder") }\n                    NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }\n                }\n                Section("页面操作") {
+                Section("App 功能") {
+                }
+                Section("页面操作") {
                     menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
                     menuAction("复制当前网址", icon: "doc.on.doc") {
                         if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
