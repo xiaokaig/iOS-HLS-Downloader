@@ -49,7 +49,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
     init(kind: DownloadQueueKind) {
         self.kind = kind
         switch kind {
-        case .hls:
+        case .hls(_, _):
             let manager = HLSDownloadManager()
             hlsManager = manager
             directManager = nil
@@ -64,7 +64,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
             manager.$conversionWarning.receive(on: DispatchQueue.main).sink { [weak self] in
                 self?.conversionWarning = $0
             }.store(in: &cancellables)
-        case .direct:
+        case .direct(_, _, _):
             let manager = DirectVideoDownloadManager()
             hlsManager = nil
             directManager = manager
