@@ -246,6 +246,7 @@ struct BrowserView: UIViewRepresentable {
     let isAdRedirectBlockingEnabled: Bool
     let isPopupBlockingEnabled: Bool
     let customAdDomains: String
+    let isDesktopMode: Bool
 
     private static let sniffingScript = """
     (() => {
@@ -407,6 +408,7 @@ struct BrowserView: UIViewRepresentable {
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
+        if isDesktopMode { webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" }
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
@@ -427,6 +429,12 @@ struct BrowserView: UIViewRepresentable {
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
         context.coordinator.customAdDomains = customAdDomains
+        let desktopModeChanged = context.coordinator.isDesktopMode != isDesktopMode
+        if desktopModeChanged {
+            context.coordinator.isDesktopMode = isDesktopMode
+            webView.customUserAgent = isDesktopMode ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" : nil
+            if webView.url != nil { webView.reload() }
+        }
         if controller.webView !== webView {
             controller.webView = webView
             context.coordinator.webView = webView
@@ -471,6 +479,7 @@ struct BrowserView: UIViewRepresentable {
         var isAdRedirectBlockingEnabled: Bool
         var isPopupBlockingEnabled: Bool
         var customAdDomains: String
+        var isDesktopMode = false
 
         private static let builtInAdDomains: Set<String> = [
             "doubleclick.net",
