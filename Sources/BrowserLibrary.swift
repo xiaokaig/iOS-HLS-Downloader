@@ -182,6 +182,8 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         case "video/webm": inferredExtension = "webm"
         case "video/quicktime": inferredExtension = "mov"
         case "video/x-m4v": inferredExtension = "m4v"
+        case "video/x-matroska": inferredExtension = "mkv"
+        case "video/x-msvideo": inferredExtension = "avi"
         default: inferredExtension = "mp4"
         }
         let suggested = URL(fileURLWithPath: rawName).pathExtension.isEmpty
