@@ -211,7 +211,7 @@ struct ContentView: View {
                                             Label("复制地址", systemImage: "doc.on.doc")
                                         }
                                         .font(.caption)
-                                        if candidateMetadata[candidateKey(url)] == "普通视频直链 · 可复制地址" {
+                                        if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
                                             Button {
                                                 showingBrowserCandidates = false
                                                 startDirectVideoDownload(url, cookies: candidateCookies[candidateKey(url)] ?? [])
@@ -733,7 +733,7 @@ struct ContentView: View {
         candidates.insert(url, at: 0)
         let ext = url.pathExtension.lowercased()
         let isDirectVideo = isDirectVideoResponse || ["mp4", "m4v", "mov", "webm"].contains(ext)
-        candidateMetadata[key] = isDirectVideo ? "普通视频直链 · 可复制地址" : "正在识别播放列表…"
+        candidateMetadata[key] = isDirectVideo ? "普通视频直链 · 正在获取大小…" : "正在识别播放列表…"
         if candidates.count > 20 {
             let removed = candidates.suffix(from: 20)
             for item in removed {
@@ -744,7 +744,44 @@ struct ContentView: View {
             candidates = Array(candidates.prefix(20))
         }
 
-        guard !isDirectVideo else { return }
+        guard !isDirectVideo else {
+            Task {
+                var request = URLRequest(url: url)
+                request.httpMethod = "HEAD"
+                request.timeoutInterval = 10
+                if let page = currentPageURL { request.setValue(page.absoluteString, forHTTPHeaderField: "Referer") }
+                if let host = url.host?.lowercased() {
+                    let matching = cookies.filter { cookie in
+                        let domain = cookie.domain.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+                        return (host == domain || host.hasSuffix("." + domain)) && url.path.hasPrefix(cookie.path)
+                    }
+                    for (name, value) in HTTPCookie.requestHeaderFields(with: matching) {
+                        request.setValue(value, forHTTPHeaderField: name)
+                    }
+                }
+                do {
+                    let (_, response) = try await URLSession.shared.data(for: request)
+                    let bytes = response.expectedContentLength
+                    await MainActor.run {
+                        guard candidates.contains(where: { candidateKey($0) == key }) else { return }
+                        if bytes > 0 {
+                            let formatter = ByteCountFormatter()
+                            formatter.countStyle = .file
+                            candidateMetadata[key] = "普通视频直链 · " + formatter.string(fromByteCount: bytes)
+                        } else {
+                            candidateMetadata[key] = "普通视频直链 · 大小未知"
+                        }
+                    }
+                } catch {
+                    await MainActor.run {
+                        if candidates.contains(where: { candidateKey($0) == key }) {
+                            candidateMetadata[key] = "普通视频直链 · 大小未知"
+                        }
+                    }
+                }
+            }
+            return
+        }
 
         Task {
             do {
