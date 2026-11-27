@@ -22,6 +22,9 @@ struct ContentView: View {
     @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
+    @AppStorage("subscribedAdDomains") private var subscribedAdDomains = ""
+    @State private var isRefreshingAdRules = false
+    @State private var adRulesStatus = "尚未更新订阅规则"
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
     @AppStorage("browserHomePage") private var browserHomePage = "start"
     @AppStorage("browserCustomHomeURL") private var browserCustomHomeURL = ""
@@ -149,7 +152,7 @@ struct ContentView: View {
                         isVideoSniffingEnabled: videoSniffingEnabled,
                         isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                         isPopupBlockingEnabled: popupBlockingEnabled,
-                        customAdDomains: customAdDomains,
+                        customAdDomains: customAdDomains + "\\n" + subscribedAdDomains,
                         isDesktopMode: browserDesktopMode
                     )
                     .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
@@ -777,7 +780,7 @@ struct ContentView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Toggle("广告页面跳转拦截", isOn: $adRedirectBlockingEnabled)
-                    Text("拦截内置广告域名及自定义域名的顶层页面跳转，不拦截普通网页资源请求。默认关闭。")
+                    Text("开启后拦截内置、自定义及订阅域名的网页请求和顶层跳转。默认关闭。")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("弹窗 / 新窗口拦截", isOn: $popupBlockingEnabled)
                     Text("阻止网页通过 window.open 或新窗口链接打开页面。默认关闭。")
@@ -819,6 +822,30 @@ struct ContentView: View {
                         Spacer()
                         Button("清空自定义规则", role: .destructive) { customAdDomains = "" }
                             .font(.caption)
+                    }
+                }
+                Section("广告规则订阅") {
+                    Text("订阅 EasyList 的域名规则，并与上方自定义域名一起生效。规则会转换为 WKWebView 内容拦截规则；复杂脚本规则和所有广告形式无法保证全部拦截。")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(subscribedAdDomains.isEmpty ? "未下载订阅规则" : "\(subscribedAdDomains.components(separatedBy: .newlines).filter { !$0.isEmpty }.count) 个域名规则")
+                                .font(.subheadline.weight(.medium))
+                            Text(adRulesStatus).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Button {
+                            refreshAdRules()
+                        } label: {
+                            if isRefreshingAdRules { ProgressView() }
+                            else { Label("更新规则", systemImage: "arrow.clockwise") }
+                        }.disabled(isRefreshingAdRules)
+                    }
+                    if !subscribedAdDomains.isEmpty {
+                        Button("清除订阅规则", role: .destructive) {
+                            subscribedAdDomains = ""
+                            adRulesStatus = "已清除订阅规则"
+                        }
                     }
                 }
                 Section("当前加载状态") {
@@ -1104,6 +1131,59 @@ struct ContentView: View {
         if let url = URL(string: prefix + query) {
             browserAddress = url.absoluteString
             browserController.load(url)
+        }
+    }
+
+    private func refreshAdRules() {
+        isRefreshingAdRules = true
+        adRulesStatus = "正在下载 EasyList…"
+        Task {
+            do {
+                guard let url = URL(string: "https://easylist.to/easylist/easylist.txt") else {
+                    throw URLError(.badURL)
+                }
+                var request = URLRequest(url: url)
+                request.timeoutInterval = 45
+                request.setValue("text/plain", forHTTPHeaderField: "Accept")
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode),
+                      let text = String(data: data, encoding: .utf8) else {
+                    throw URLError(.badServerResponse)
+                }
+                var seen = Set<String>()
+                var domains: [String] = []
+                for rawLine in text.components(separatedBy: .newlines) {
+                    let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                    if line.isEmpty || line.hasPrefix("!") || line.hasPrefix("[") { continue }
+                    var candidates: [String] = []
+                    if line.hasPrefix("||") {
+                        let body = String(line.dropFirst(2))
+                        let host = body.prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" }
+                        candidates.append(String(host))
+                    } else {
+                        let fields = line.split(whereSeparator: { $0.isWhitespace })
+                        if fields.count >= 2 && (fields[0] == "0.0.0.0" || fields[0] == "127.0.0.1") {
+                            candidates.append(contentsOf: fields.dropFirst().map(String.init))
+                        }
+                    }
+                    for domain in candidates where domain.range(of: "^[a-z0-9.-]+$", options: .regularExpression) != nil && domain.contains(".") {
+                        if seen.insert(domain).inserted { domains.append(domain) }
+                        if domains.count >= 1200 { break }
+                    }
+                    if domains.count >= 1200 { break }
+                }
+                guard !domains.isEmpty else { throw URLError(.cannotParseResponse) }
+                await MainActor.run {
+                    subscribedAdDomains = domains.joined(separator: "\\n")
+                    adRulesStatus = "更新完成 · \(Date().formatted(date: .numeric, time: .shortened))"
+                    isRefreshingAdRules = false
+                }
+            } catch {
+                await MainActor.run {
+                    adRulesStatus = "更新失败：\(error.localizedDescription)"
+                    isRefreshingAdRules = false
+                }
+            }
         }
     }
 
