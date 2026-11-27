@@ -41,6 +41,12 @@ struct ContentView: View {
     @AppStorage("alistBaseURL") private var alistBaseURL = ""
     @AppStorage("alistUsername") private var alistUsername = ""
     @AppStorage("alistTargetDirectory") private var alistTargetDirectory = "/"
+    @AppStorage("alistChooseDirectoryOnUpload") private var alistChooseDirectoryOnUpload = false
+    @State private var showingAListDirectoryPicker = false
+    @State private var alistDirectoryPath = "/"
+    @State private var alistDirectories: [AListDirectory] = []
+    @State private var isLoadingAListDirectories = false
+    @State private var pendingAListUploadURL: URL?
     @State private var menuEditMode: EditMode = .inactive
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
@@ -260,6 +266,7 @@ struct ContentView: View {
             .sheet(isPresented: $showingBookmarks) { browserBookmarksSheet }
             .sheet(isPresented: $showingDownloads) { downloadsTab }
             .sheet(isPresented: $showingFiles) { filesTab }
+            .sheet(isPresented: $showingAListDirectoryPicker) { alistDirectoryPicker }
             .sheet(isPresented: $showingBrowserMenu) {
                 browserMenuSheet
                     .presentationDetents([.medium, .large])
@@ -1037,9 +1044,16 @@ struct ContentView: View {
                         .autocorrectionDisabled()
                     TextField("二步验证码（如启用）", text: $alistOTPCode)
                         .keyboardType(.numberPad)
-                    TextField("上传目标目录，例如 /Videos", text: $alistTargetDirectory)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
+                    Toggle("上传时选择目录", isOn: $alistChooseDirectoryOnUpload)
+                    HStack {
+                        Text("默认上传目录")
+                        Spacer()
+                        Text(alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Text("关闭时直接上传到记住的目录；开启后每次上传前可浏览并选择 AList 文件夹，选择结果会自动记住。")
+                        .font(.caption).foregroundStyle(.secondary)
                     HStack {
                         Button {
                             testAListConnection()
@@ -1319,6 +1333,98 @@ struct ContentView: View {
     private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {
         downloadQueue.enqueueDirect(url, cookies: cookies, referrer: currentPageURL)
         showingDownloads = true
+    }
+
+    private var alistDirectoryPicker: some View {
+        NavigationStack {
+            List {
+                Section {
+                    HStack {
+                        Image(systemName: "folder.fill").foregroundStyle(.blue)
+                        Text(alistDirectoryPath)
+                            .font(.subheadline)
+                            .lineLimit(2)
+                        Spacer()
+                        Button("选择此目录") { confirmAListDirectorySelection() }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoadingAListDirectories)
+                    }
+                }
+                if alistDirectoryPath != "/" {
+                    Button {
+                        let parts = alistDirectoryPath.split(separator: "/")
+                        alistDirectoryPath = parts.count <= 1 ? "/" : "/" + parts.dropLast().joined(separator: "/")
+                        loadAListDirectories()
+                    } label: {
+                        Label("返回上一级", systemImage: "arrow.up.left")
+                    }
+                }
+                Section("文件夹") {
+                    if isLoadingAListDirectories {
+                        HStack { Spacer(); ProgressView("正在读取目录…"); Spacer() }
+                    } else if alistDirectories.isEmpty {
+                        Text("此目录下没有子文件夹").foregroundStyle(.secondary)
+                    } else {
+                        ForEach(alistDirectories) { directory in
+                            Button {
+                                alistDirectoryPath = alistDirectoryPath == "/" ? "/\(directory.name)" : alistDirectoryPath + "/\(directory.name)"
+                                loadAListDirectories()
+                            } label: {
+                                Label(directory.name, systemImage: "folder")
+                                    .foregroundStyle(.primary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("选择 AList 上传目录")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { showingAListDirectoryPicker = false; pendingAListUploadURL = nil }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { loadAListDirectories() } label: { Image(systemName: "arrow.clockwise") }
+                        .disabled(isLoadingAListDirectories)
+                }
+            }
+            .task { loadAListDirectories() }
+        }
+        .presentationDetents([.medium, .large])
+        .presentationDragIndicator(.visible)
+    }
+
+    private func loadAListDirectories() {
+        let password = alistPassword.isEmpty ? (AListCredentialStore.loadPassword() ?? "") : alistPassword
+        guard !alistBaseURL.isEmpty, !alistUsername.isEmpty, !password.isEmpty else {
+            errorMessage = "请先在设置中配置并测试 AList 登录。"
+            showingAListDirectoryPicker = false
+            return
+        }
+        isLoadingAListDirectories = true
+        Task {
+            do {
+                let result = try await alistUploader.listDirectories(
+                    serverAddress: alistBaseURL,
+                    username: alistUsername,
+                    password: password,
+                    otpCode: alistOTPCode,
+                    directory: alistDirectoryPath
+                )
+                alistDirectories = result
+            } catch {
+                errorMessage = "读取 AList 目录失败：\\(error.localizedDescription)"
+            }
+            isLoadingAListDirectories = false
+        }
+    }
+
+    private func confirmAListDirectorySelection() {
+        alistTargetDirectory = alistDirectoryPath
+        showingAListDirectoryPicker = false
+        guard let fileURL = pendingAListUploadURL else { return }
+        pendingAListUploadURL = nil
+        performAListUpload(fileURL)
     }
 
     private func testAListConnection() {
