@@ -295,7 +295,7 @@ struct ContentView: View {
                             else { Label("解析地址", systemImage: "text.magnifyingglass").frame(maxWidth: .infinity) }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInspecting || downloader.isDownloading)
+                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInspecting || downloader.isDownloading || directDownloader.isDownloading)
                     }
                     .padding()
                     .background(.background)
@@ -314,7 +314,7 @@ struct ContentView: View {
                             }
                         }
                         HStack(alignment: .top, spacing: 12) {
-                            Image(systemName: downloader.isDownloading ? "arrow.down.doc.fill" : "doc")
+                            Image(systemName: downloader.isDownloading || directDownloader.isDownloading ? "arrow.down.doc.fill" : "doc")
                                 .font(.title2)
                                 .foregroundStyle(.blue)
                                 .frame(width: 44, height: 44)
@@ -620,7 +620,7 @@ struct ContentView: View {
                 Button(action: startPendingDownload) {
                     Label("开始下载", systemImage: "arrow.down.to.line").frame(maxWidth: .infinity)
                 }.buttonStyle(.borderedProminent).padding()
-                    .disabled(downloader.isDownloading || (!parsedIsEndList && variants.isEmpty))
+                    .disabled(downloader.isDownloading || directDownloader.isDownloading || (!parsedIsEndList && variants.isEmpty))
                     .background(.regularMaterial)
             }
             .navigationTitle("视频信息")
@@ -831,7 +831,11 @@ struct ContentView: View {
 
     private func deleteFiles(at offsets: IndexSet) {
         for index in offsets {
-            try? FileManager.default.removeItem(at: localFiles[index])
+            let url = localFiles[index]
+            try? FileManager.default.removeItem(at: url)
+            if let entry = library.history.first(where: { $0.fileURL == url.absoluteString }) {
+                library.removeHistory(entry.id)
+            }
         }
         refreshFiles()
     }
