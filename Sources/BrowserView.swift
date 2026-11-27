@@ -258,6 +258,8 @@ struct BrowserView: UIViewRepresentable {
     let isPopupBlockingEnabled: Bool
     let customAdDomains: String
     let isDesktopMode: Bool
+    let stripMobilePrefix: Bool
+    let zoomLevel: Double
 
     private static let sniffingScript = """
     (() => {
@@ -463,6 +465,9 @@ struct BrowserView: UIViewRepresentable {
                 ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
                 : nil
             context.coordinator.isDesktopMode = isDesktopMode
+            context.coordinator.stripMobilePrefix = stripMobilePrefix
+            context.coordinator.zoomLevel = zoomLevel
+            existing.evaluateJavaScript("document.documentElement.style.zoom = '\(zoomLevel)'", completionHandler: nil)
             context.coordinator.isSniffingEnabled = isSniffingEnabled
             context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
             context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
@@ -501,6 +506,8 @@ struct BrowserView: UIViewRepresentable {
         webView.navigationDelegate = context.coordinator
         if isDesktopMode { webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" }
         context.coordinator.isDesktopMode = isDesktopMode
+        context.coordinator.stripMobilePrefix = stripMobilePrefix
+        context.coordinator.zoomLevel = zoomLevel
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
@@ -527,10 +534,16 @@ struct BrowserView: UIViewRepresentable {
         context.coordinator.customAdDomains = customAdDomains
         installContentRules(in: webView.configuration.userContentController, coordinator: context.coordinator)
         let desktopModeChanged = context.coordinator.isDesktopMode != isDesktopMode
-        if desktopModeChanged {
+        let stripPrefixChanged = context.coordinator.stripMobilePrefix != stripMobilePrefix
+        if desktopModeChanged || stripPrefixChanged {
             context.coordinator.isDesktopMode = isDesktopMode
+            context.coordinator.stripMobilePrefix = stripMobilePrefix
             webView.customUserAgent = isDesktopMode ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" : nil
             if webView.url != nil { webView.reload() }
+        }
+        if context.coordinator.zoomLevel != zoomLevel {
+            context.coordinator.zoomLevel = zoomLevel
+            webView.evaluateJavaScript("document.documentElement.style.zoom = '\(zoomLevel)'", completionHandler: nil)
         }
         if controller.webView !== webView {
             controller.webView = webView
@@ -573,6 +586,8 @@ struct BrowserView: UIViewRepresentable {
         var isPopupBlockingEnabled: Bool
         var customAdDomains: String
         var isDesktopMode = false
+        var stripMobilePrefix = false
+        var zoomLevel = 1.0
         var adRulesSignature: String?
 
         private static let builtInAdDomains: Set<String> = [
@@ -672,6 +687,23 @@ struct BrowserView: UIViewRepresentable {
                 decisionHandler(.cancel)
                 return
             }
+            if isMainFrame, isDesktopMode, stripMobilePrefix,
+               let host = url.host?.lowercased(), host.hasPrefix("m."),
+               var components = URLComponents(url: url, resolvingAgainstBaseURL: false) {
+                components.host = String(host.dropFirst(2))
+                if let target = components.url {
+                    AppDiagnostics.shared.log("NAV", "桌面版移除移动站前缀：\(host) → \(target.host ?? "")")
+                    if isNewWindow {
+                        onNewTab(target)
+                    } else {
+                        var request = navigationAction.request
+                        request.url = target
+                        webView.load(request)
+                    }
+                    decisionHandler(.cancel)
+                    return
+                }
+            }
             if isNewWindow {
                 AppDiagnostics.shared.log("TAB", "网页请求在新标签打开 url=\(AppDiagnostics.safeURL(url))")
                 onNewTab(url)
@@ -728,6 +760,7 @@ struct BrowserView: UIViewRepresentable {
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             controller.navigationFinished(webView)
+            webView.evaluateJavaScript("document.documentElement.style.zoom = '\(zoomLevel)'", completionHandler: nil)
             if let url = webView.url { onAddressChange(url.absoluteString) }
         }
 
