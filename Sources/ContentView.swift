@@ -79,6 +79,7 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { phase in
             AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
+            if phase == .active { downloadQueue.applicationDidBecomeActive() }
         }
         .sheet(isPresented: $showingVariants) {
             variantPicker
@@ -760,7 +761,7 @@ struct ContentView: View {
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
                             .font(.caption).foregroundStyle(.orange)
                     }
-                    Label("HLS 暂停后会保留已下载分片，继续时从缓存恢复；普通视频支持暂停 / 继续。iOS 后台执行仍受系统调度限制。", systemImage: "info.circle")
+                    Label("最多 3 个任务并行；HLS 暂停后保留已下载分片，继续时从缓存恢复。切到后台会申请有限执行时间，时间耗尽后自动暂停，回到应用可继续。", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 .padding()
@@ -879,7 +880,7 @@ struct ContentView: View {
                     }
                 }
                 Section("广告域名规则") {
-                    Text("内置规则包含常见广告跳转域名。可在下面逐行添加域名，仅拦截该域名及其子域名。不要填写 https:// 或路径。")
+                    Text("内置规则包含常见广告域名。可在下面逐行添加域名，拦截该域名及其子域名的网页请求。不要填写 https:// 或路径。")
                         .font(.caption).foregroundStyle(.secondary)
                     TextEditor(text: $customAdDomains)
                         .font(.system(.footnote, design: .monospaced))
@@ -917,6 +918,15 @@ struct ContentView: View {
                             adRulesStatus = "已清除订阅规则"
                         }
                     }
+                }
+                Section("下载通知") {
+                    Button {
+                        downloadQueue.requestNotificationPermission()
+                    } label: {
+                        Label("允许下载完成通知", systemImage: "bell.badge")
+                    }
+                    Text("授权后，下载完成时会发送本地通知。")
+                        .font(.caption).foregroundStyle(.secondary)
                 }
                 Section("当前加载状态") {
                     Text(browserController.diagnostic)
@@ -1177,6 +1187,7 @@ struct ContentView: View {
             let raw = browserCustomHomeURL.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !raw.isEmpty else {
                 browserAddress = ""
+                tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
                 browserController.rebuildWebView()
                 return
             }
@@ -1186,9 +1197,11 @@ struct ContentView: View {
                 return
             }
             browserAddress = url.absoluteString
+            tabManager.update(tabManager.activeTabID, url: url.absoluteString, title: url.host ?? "主页")
             browserController.load(url)
         } else {
             browserAddress = ""
+            tabManager.update(tabManager.activeTabID, url: "", title: "起始页")
             browserController.rebuildWebView()
         }
     }
