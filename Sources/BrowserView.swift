@@ -110,13 +110,37 @@ final class BrowserController: ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
     @Published private(set) var isLoading = false
+    @Published private(set) var estimatedProgress = 0.0
+    @Published private(set) var showsNavigationProgress = false
     @Published private(set) var diagnostic = "等待输入网址"
     @Published var webViewID = UUID()
 
     var webView: WKWebView?
     var retainedCoordinator: AnyObject?
+    private var progressObservation: NSKeyValueObservation?
     private var requestedKey: String?
     private var navigationStartedAt: Date?
+
+    func observeProgress(of view: WKWebView) {
+        progressObservation?.invalidate()
+        progressObservation = view.observe(\\.estimatedProgress, options: [.initial, .new]) { [weak self] observed, _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.estimatedProgress = observed.estimatedProgress
+                if observed.isLoading { self.showsNavigationProgress = true }
+            }
+        }
+    }
+
+    private func finishProgress() {
+        estimatedProgress = 1
+        showsNavigationProgress = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
+            guard let self, self.estimatedProgress >= 1 else { return }
+            self.showsNavigationProgress = false
+            self.estimatedProgress = 0
+        }
+    }
 
     func load(_ url: URL) {
         guard let webView else {
@@ -132,6 +156,8 @@ final class BrowserController: ObservableObject {
 
         requestedKey = key
         navigationStartedAt = Date()
+        estimatedProgress = max(estimatedProgress, 0.03)
+        showsNavigationProgress = true
         diagnostic = "阶段：正在加载\n地址：\(url.absoluteString)"
         AppDiagnostics.shared.log("NAV", "用户发起导航 url=\(AppDiagnostics.safeURL(url))")
         webView.load(URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: 30))
@@ -166,6 +192,7 @@ final class BrowserController: ObservableObject {
         AppDiagnostics.shared.log("NAV", "用户停止加载")
         webView.stopLoading()
         isLoading = false
+        finishProgress()
         update(webView)
     }
 
@@ -229,6 +256,7 @@ final class BrowserController: ObservableObject {
         let failedURL = value.userInfo[NSURLErrorFailingURLStringErrorKey] as? String
         diagnostic = "阶段：\(stage)\n耗时：\(elapsed)\n地址：\(view.url?.absoluteString ?? "未知")\n失败地址：\(failedURL ?? "未提供")\n错误域：\(value.domain)\n错误码：\(value.code)\n描述：\(value.localizedDescription)"
         requestedKey = nil
+        finishProgress()
         AppDiagnostics.shared.log("ERROR", "stage=\(stage) elapsed=\(elapsed) domain=\(value.domain) code=\(value.code) description=\(value.localizedDescription) url=\(AppDiagnostics.safeURL(view.url))")
         update(view)
     }
@@ -236,6 +264,7 @@ final class BrowserController: ObservableObject {
     func navigationFinished(_ view: WKWebView) {
         requestedKey = nil
         diagnostic = "阶段：加载完成\n地址：\(view.url?.absoluteString ?? "未知")"
+        finishProgress()
         update(view)
     }
 
@@ -440,31 +469,68 @@ struct BrowserView: UIViewRepresentable {
         let signature = domains.joined(separator: "|")
         guard coordinator.adRulesSignature != signature else { return }
         coordinator.adRulesSignature = signature
-        let rules: [[String: Any]] = domains.map { domain in
-            let escaped = NSRegularExpression.escapedPattern(for: domain)
-            return [
-                "trigger": ["url-filter": "^https?://([^/]+\\.)*\(escaped)([/:?#]|$)"],
-                "action": ["type": "block"]
-            ]
-        }
-        guard let data = try? JSONSerialization.data(withJSONObject: rules),
-              let encoded = String(data: data, encoding: .utf8) else { return }
-        let identifier = "BrowserAdRules-\(String(signature.hashValue.magnitude))"
-        WKContentRuleListStore.default().compileContentRuleList(
-            forIdentifier: identifier,
-            encodedContentRuleList: encoded
-        ) { list, error in
-            DispatchQueue.main.async {
-                guard coordinator.adRulesSignature == signature else { return }
-                contentController.removeAllContentRuleLists()
-                if let list {
-                    contentController.add(list)
-                    coordinator.webView?.reload()
-                    AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domains.count) 个域名")
-                } else if let error {
-                    let detail = error as NSError
-                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败 domain=\(detail.domain) code=\(detail.code) info=\(detail.userInfo) rules=\(domains.count) first=\(domains.prefix(5).joined(separator: ","))")
+        let domainList = Array(domains)
+        let store = WKContentRuleListStore.default()
+
+        // WebKit rejects an entire content-rule list when even one expression is
+        // unsupported. Compile as a whole first, then bisect failed batches so a
+        // malformed custom domain cannot disable every valid ad rule.
+        func compile(_ subset: [String], completion: @escaping ([WKContentRuleList]) -> Void) {
+            guard !subset.isEmpty else {
+                completion([])
+                return
+            }
+            let rules: [[String: Any]] = subset.map { domain in
+                let escaped = NSRegularExpression.escapedPattern(for: domain)
+                return [
+                    "trigger": ["url-filter": "^https?://([^/]+\\.)*\(escaped)([/:?#]|$)"],
+                    "action": ["type": "block"]
+                ]
+            }
+            guard let data = try? JSONSerialization.data(withJSONObject: rules),
+                  let encoded = String(data: data, encoding: .utf8) else {
+                completion([])
+                return
+            }
+            let identifier = "BrowserAdRules-\(String(signature.hashValue.magnitude))-\(UUID().uuidString)"
+            store.compileContentRuleList(
+                forIdentifier: identifier,
+                encodedContentRuleList: encoded
+            ) { list, error in
+                DispatchQueue.main.async {
+                    guard coordinator.adRulesSignature == signature else {
+                        completion([])
+                        return
+                    }
+                    if let list {
+                        completion([list])
+                        return
+                    }
+                    if subset.count == 1 {
+                        let detail = error as NSError?
+                        AppDiagnostics.shared.log("ERROR", "跳过无法编译的广告域名：\(subset[0]) error=\(detail?.localizedDescription ?? "未知错误")")
+                        completion([])
+                        return
+                    }
+                    let middle = subset.count / 2
+                    compile(Array(subset[..<middle])) { left in
+                        compile(Array(subset[middle...])) { right in
+                            completion(left + right)
+                        }
+                    }
                 }
+            }
+        }
+
+        compile(domainList) { lists in
+            guard coordinator.adRulesSignature == signature else { return }
+            contentController.removeAllContentRuleLists()
+            lists.forEach { contentController.add($0) }
+            if !lists.isEmpty {
+                coordinator.webView?.reload()
+                AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domainList.count) 个域名，拆分规则组 \(lists.count) 组")
+            } else {
+                AppDiagnostics.shared.log("ERROR", "广告规则未能编译，未加载任何规则")
             }
         }
     }
@@ -502,6 +568,7 @@ struct BrowserView: UIViewRepresentable {
                 context.coordinator.customAdDomains != customAdDomains
             existing.navigationDelegate = context.coordinator
             existing.uiDelegate = context.coordinator
+            controller.observeProgress(of: existing)
             existing.customUserAgent = isDesktopMode
                 ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
                 : nil
@@ -559,6 +626,7 @@ struct BrowserView: UIViewRepresentable {
 
         context.coordinator.webView = webView
         controller.webView = webView
+        controller.observeProgress(of: webView)
 
         // Initial navigation occurs once, only when a real URL was supplied.
         if let url = URL(string: address), let scheme = url.scheme, ["http", "https"].contains(scheme), url.host != nil {
