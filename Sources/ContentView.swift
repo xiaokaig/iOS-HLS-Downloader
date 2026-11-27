@@ -249,8 +249,12 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if library.browsingHistory.isEmpty {
-                    ContentUnavailableView("暂无浏览记录", systemImage: "clock.arrow.circlepath",
-                                           description: Text("访问过的网页会自动保存在这里。"))
+                    VStack(spacing: 10) {
+                        Image(systemName: "clock.arrow.circlepath").font(.system(size: 40)).foregroundStyle(.tertiary)
+                        Text("暂无浏览记录").font(.headline)
+                        Text("访问过的网页会自动保存在这里。").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         ForEach(library.browsingHistory) { entry in
@@ -293,8 +297,12 @@ struct ContentView: View {
         NavigationStack {
             Group {
                 if library.bookmarks.isEmpty {
-                    ContentUnavailableView("还没有书签", systemImage: "bookmark",
-                                           description: Text("浏览网页时点击地址栏旁的书签图标即可收藏。"))
+                    VStack(spacing: 10) {
+                        Image(systemName: "bookmark").font(.system(size: 40)).foregroundStyle(.tertiary)
+                        Text("还没有书签").font(.headline)
+                        Text("浏览网页时点击地址栏旁的书签图标即可收藏。").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     List {
                         ForEach(library.bookmarks) { bookmark in
