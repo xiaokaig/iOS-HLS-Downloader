@@ -427,6 +427,7 @@ struct BrowserView: UIViewRepresentable {
                 contentController.removeAllContentRuleLists()
                 if let list {
                     contentController.add(list)
+                    coordinator.webView?.reload()
                     AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domains.count) 个域名")
                 } else if let error {
                     AppDiagnostics.shared.log("ERROR", "广告规则编译失败：\(error.localizedDescription)")
@@ -459,6 +460,13 @@ struct BrowserView: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         if let existing = controller.webView {
+            let settingsChanged =
+                context.coordinator.isDesktopMode != isDesktopMode ||
+                context.coordinator.stripMobilePrefix != stripMobilePrefix ||
+                context.coordinator.isSniffingEnabled != isSniffingEnabled ||
+                context.coordinator.isVideoSniffingEnabled != isVideoSniffingEnabled ||
+                context.coordinator.isAdRedirectBlockingEnabled != isAdRedirectBlockingEnabled ||
+                context.coordinator.customAdDomains != customAdDomains
             existing.navigationDelegate = context.coordinator
             existing.uiDelegate = context.coordinator
             existing.customUserAgent = isDesktopMode
@@ -483,6 +491,7 @@ struct BrowserView: UIViewRepresentable {
             }
             installContentRules(in: contentController, coordinator: context.coordinator)
             context.coordinator.webView = existing
+            if settingsChanged, existing.url != nil { existing.reload() }
             return existing
         }
         let contentController = WKUserContentController()
