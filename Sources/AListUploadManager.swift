@@ -187,7 +187,7 @@ final class AListUploadManager: NSObject, ObservableObject, URLSessionUploadDele
         }
         guard let http = response as? HTTPURLResponse else {
             let error = AListUploadError.invalidResponse
-            status = "上传失败：\(error.localizedDescription ?? "响应无效")"
+            status = "上传失败：\(error.localizedDescription)"
             continuation?.resume(throwing: error)
             continuation = nil
             return
