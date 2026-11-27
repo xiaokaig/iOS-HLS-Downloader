@@ -6,6 +6,8 @@ import UIKit
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var downloader = HLSDownloadManager()
+    @StateObject private var directDownloader = DirectVideoDownloadManager()
+    @StateObject private var library = BrowserLibraryStore()
     @StateObject private var browserController = BrowserController()
     @State private var selectedTab = 0
     @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
@@ -37,6 +39,7 @@ struct ContentView: View {
     // Local files
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
+    @State private var directDownloadSourceURL: URL?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -49,12 +52,16 @@ struct ContentView: View {
                 .tag(1)
 
             filesTab
-                .tabItem { Label("文件", systemImage: "folder") }
+                .tabItem { Label("历史", systemImage: "clock.arrow.circlepath") }
                 .tag(2)
+
+            bookmarksTab
+                .tabItem { Label("书签", systemImage: "bookmark") }
+                .tag(3)
 
             settingsTab
                 .tabItem { Label("设置", systemImage: "gearshape") }
-                .tag(3)
+                .tag(4)
         }
         .tint(.blue)
         .onAppear {
@@ -63,6 +70,12 @@ struct ContentView: View {
         }
         .onChange(of: scenePhase) { phase in
             AppDiagnostics.shared.log("APP", "scenePhase=\(String(describing: phase))")
+        }
+        .onChange(of: directDownloader.outputURL) { url in
+            guard let url else { return }
+            library.recordDownload(fileURL: url, sourceURL: directDownloadSourceURL)
+            directDownloadSourceURL = nil
+            refreshFiles()
         }
         .sheet(isPresented: $showingVariants) {
             variantPicker
@@ -96,6 +109,13 @@ struct ContentView: View {
                         .keyboardType(.URL).textInputAutocapitalization(.never)
                         .autocorrectionDisabled().submitLabel(.go).onSubmit(loadBrowserAddress)
                     if browserController.isLoading { ProgressView().controlSize(.small) }
+                    Button {
+                        toggleCurrentBookmark()
+                    } label: {
+                        Image(systemName: currentPageIsBookmarked ? "bookmark.fill" : "bookmark")
+                            .font(.system(size: 16, weight: .semibold))
+                    }
+                    .disabled(currentPageURL == nil)
                     Button(action: loadBrowserAddress) { Image(systemName: "arrow.right").font(.system(size: 16, weight: .semibold)) }
                 }
                 .padding(.horizontal, 15).frame(height: 48)
@@ -180,9 +200,23 @@ struct ContentView: View {
                                     Text(url.host ?? url.absoluteString).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
                                     Text(candidateMetadata[candidateKey(url)] ?? "正在识别播放列表…")
                                         .font(.caption).foregroundStyle(.blue)
-                                    Button { UIPasteboard.general.string = url.absoluteString } label: {
-                                        Label("复制地址", systemImage: "doc.on.doc")
-                                    }.font(.caption)
+                                    HStack(spacing: 16) {
+                                        Button { UIPasteboard.general.string = url.absoluteString } label: {
+                                            Label("复制地址", systemImage: "doc.on.doc")
+                                        }
+                                        .font(.caption)
+                                        if candidateMetadata[candidateKey(url)] == "普通视频直链 · 可复制地址" {
+                                            Button {
+                                                showingBrowserCandidates = false
+                                                startDirectVideoDownload(url, cookies: candidateCookies[candidateKey(url)] ?? [])
+                                            } label: {
+                                                Label("下载", systemImage: "arrow.down.circle.fill")
+                                            }
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(.blue)
+                                            .disabled(directDownloader.isDownloading || downloader.isDownloading)
+                                        }
+                                    }
                                 }.padding(.vertical, 5)
                             }
                         }
@@ -287,9 +321,15 @@ struct ContentView: View {
                                 .background(Color.blue.opacity(0.10))
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
                             VStack(alignment: .leading, spacing: 6) {
-                                Text(downloader.status)
+                                Text(directDownloader.isDownloading || directDownloader.outputURL != nil
+                                     ? directDownloader.status : downloader.status)
                                     .font(.headline)
-                                if downloader.isDownloading {
+                                if directDownloader.isDownloading {
+                                    ProgressView(value: directDownloader.progress)
+                                    Text(directDownloader.progress, format: .percent.precision(.fractionLength(0)))
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                } else if downloader.isDownloading {
                                     ProgressView(value: downloader.progress)
                                     Text(downloader.progress, format: .percent.precision(.fractionLength(0)))
                                         .font(.caption.monospacedDigit())
@@ -313,7 +353,13 @@ struct ContentView: View {
                                 .foregroundStyle(.orange)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
-                        if let output = downloader.outputURL {
+                        if let output = directDownloader.outputURL {
+                            ShareLink(item: output) {
+                                Label("分享 / 导出视频", systemImage: "square.and.arrow.up")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
+                        } else if let output = downloader.outputURL {
                             ShareLink(item: output) {
                                 Label("分享 / 导出视频", systemImage: "square.and.arrow.up")
                                     .frame(maxWidth: .infinity)
@@ -336,6 +382,48 @@ struct ContentView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("下载")
             .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+
+    private var bookmarksTab: some View {
+        NavigationStack {
+            Group {
+                if library.bookmarks.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "bookmark").font(.system(size: 42)).foregroundStyle(.tertiary)
+                        Text("还没有书签").font(.headline)
+                        Text("浏览网页时点击地址栏旁的书签图标即可收藏。")
+                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color(uiColor: .systemGroupedBackground))
+                } else {
+                    List {
+                        ForEach(library.bookmarks) { bookmark in
+                            Button {
+                                guard let url = URL(string: bookmark.url) else { return }
+                                selectedTab = 0
+                                browserAddress = url.absoluteString
+                                browserController.load(url)
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(bookmark.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(bookmark.url).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .swipeActions {
+                                Button(role: .destructive) {
+                                    library.removeBookmark(bookmark.id)
+                                } label: { Label("删除", systemImage: "trash") }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("书签")
         }
     }
 
@@ -369,7 +457,7 @@ struct ContentView: View {
                                     Text(url.lastPathComponent)
                                         .font(.subheadline.weight(.medium))
                                         .lineLimit(1)
-                                    Text(fileSize(url))
+                                    Text("\(fileSize(url)) · \(formattedFileDate(url))")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }
@@ -395,7 +483,7 @@ struct ContentView: View {
                     .refreshable { refreshFiles() }
                 }
             }
-            .navigationTitle("文件")
+            .navigationTitle("下载历史")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: refreshFiles) {
@@ -605,6 +693,37 @@ struct ContentView: View {
         }
     }
 
+    private var currentPageURL: URL? {
+        browserController.webView?.url ?? URL(string: browserAddress)
+    }
+
+    private var currentPageIsBookmarked: Bool {
+        guard let url = currentPageURL else { return false }
+        return library.isBookmarked(url)
+    }
+
+    private func toggleCurrentBookmark() {
+        guard let url = currentPageURL, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
+        let title = browserController.webView?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = (title?.isEmpty == false ? title! : (url.host ?? url.absoluteString))
+        library.addBookmark(url: url, title: value)
+    }
+
+    private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {
+        guard !downloader.isDownloading, !directDownloader.isDownloading else {
+            errorMessage = "当前已有下载任务，请完成后再开始。"
+            return
+        }
+        directDownloadSourceURL = url
+        directDownloader.start(url: url, cookies: cookies, referrer: currentPageURL)
+        selectedTab = 1
+    }
+
+    private func formattedFileDate(_ url: URL) -> String {
+        let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+        return date.formatted(date: .numeric, time: .shortened)
+    }
+
     private func loadBrowserAddress() {
         let raw = browserAddress.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !raw.isEmpty else { return }
@@ -678,8 +797,11 @@ struct ContentView: View {
     private func startDownload(_ url: URL, cookies: [HTTPCookie]) {
         Task {
             do {
-                _ = try await downloader.start(url: url, cookies: cookies)
-                await MainActor.run { refreshFiles() }
+                let output = try await downloader.start(url: url, cookies: cookies)
+                await MainActor.run {
+                    library.recordDownload(fileURL: output, sourceURL: url)
+                    refreshFiles()
+                }
             } catch {
                 await MainActor.run { errorMessage = error.localizedDescription }
             }
@@ -693,8 +815,11 @@ struct ContentView: View {
             includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
             options: [.skipsHiddenFiles]
         )) ?? []
-        localFiles = urls.filter { ["mp4", "ts", "m4v", "mov"].contains($0.pathExtension.lowercased()) }
+        localFiles = urls.filter { ["mp4", "ts", "m4v", "mov", "webm"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
+        for file in localFiles where !library.history.contains(where: { $0.fileURL == file.absoluteString }) {
+            library.recordDownload(fileURL: file, sourceURL: nil)
+        }
     }
 
     private func fileSize(_ url: URL) -> String {
