@@ -1085,7 +1085,7 @@ struct ContentView: View {
                         let (_, response) = try await URLSession.shared.data(for: rangeRequest)
                         if let http = response as? HTTPURLResponse,
                            let range = http.value(forHTTPHeaderField: "Content-Range"),
-                           let total = Int64(range.split(separator: "/").last ?? ""), total > 0 {
+                           let total = Int64(String(range.split(separator: "/").last ?? "")), total > 0 {
                             bytes = total
                         } else if response.expectedContentLength > 1 {
                             bytes = response.expectedContentLength
