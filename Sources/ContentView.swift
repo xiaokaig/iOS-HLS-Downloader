@@ -107,14 +107,6 @@ struct ContentView: View {
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.visible)
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { playingURL != nil },
-            set: { if !$0 { playingURL = nil } }
-        )) {
-            if let url = playingURL {
-                HLSPlayerScreen(url: url).ignoresSafeArea().background(.black)
-            }
-        }
         .alert("操作未完成", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -910,7 +902,7 @@ struct ContentView: View {
                                 .buttonStyle(.plain)
                                 .disabled(alistUploader.isUploading)
                                 Button {
-                                    playingURL = url
+                                    openPlayer(url)
                                 } label: {
                                     Image(systemName: "play.circle")
                                         .font(.title2)
@@ -937,6 +929,16 @@ struct ContentView: View {
                         Image(systemName: "arrow.clockwise")
                     }
                 }
+            }
+        }
+        .fullScreenCover(isPresented: Binding(
+            get: { playingURL != nil },
+            set: { if !$0 { playingURL = nil } }
+        )) {
+            if let url = playingURL {
+                HLSPlayerScreen(url: url, onClose: { playingURL = nil })
+                    .ignoresSafeArea()
+                    .background(.black)
             }
         }
     }
