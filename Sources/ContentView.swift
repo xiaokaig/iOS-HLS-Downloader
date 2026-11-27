@@ -392,7 +392,6 @@ struct ContentView: View {
             }
         case "desktop":
             Toggle("桌面版网站", isOn: $browserDesktopMode)
-                .onChange(of: browserDesktopMode) { _ in browserController.reload() }
         case "strip":
             Toggle("桌面版时去除 m. 前缀", isOn: $browserStripMobilePrefix)
                 .disabled(!browserDesktopMode)
@@ -887,7 +886,7 @@ struct ContentView: View {
                     Text(hlsSniffingEnabled ? "已开启：浏览网页时自动检测 HLS 视频地址。" : "已关闭：不注入 HLS 嗅探脚本，普通网页仍可正常浏览。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Toggle("广告页面跳转拦截", isOn: $adRedirectBlockingEnabled)
+                    Toggle("广告域名拦截", isOn: $adRedirectBlockingEnabled)
                     Text("开启后拦截内置、自定义及订阅域名的网页请求和顶层跳转。默认关闭。")
                         .font(.caption).foregroundStyle(.secondary)
                     Toggle("弹窗 / 新窗口拦截", isOn: $popupBlockingEnabled)
@@ -1193,9 +1192,13 @@ struct ContentView: View {
 
     private func toggleCurrentBookmark() {
         guard let url = currentPageURL, ["http", "https"].contains(url.scheme?.lowercased() ?? "") else { return }
-        let title = browserController.webView?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = (title?.isEmpty == false ? title! : (url.host ?? url.absoluteString))
-        library.addBookmark(url: url, title: value)
+        if let existing = library.bookmarks.first(where: { $0.url == url.absoluteString }) {
+            library.removeBookmark(existing.id)
+        } else {
+            let title = browserController.webView?.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let value = (title?.isEmpty == false ? title! : (url.host ?? url.absoluteString))
+            library.addBookmark(url: url, title: value)
+        }
     }
 
     private func startDirectVideoDownload(_ url: URL, cookies: [HTTPCookie]) {
