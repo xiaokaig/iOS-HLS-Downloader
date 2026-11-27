@@ -762,6 +762,42 @@ struct ContentView: View {
                         .disabled(!downloadQueue.items.contains { [.completed, .failed, .cancelled].contains($0.state) })
                     }
 
+                    if !library.history.isEmpty {
+                        VStack(alignment: .leading, spacing: 8) {
+                            HStack {
+                                Text("下载历史").font(.title3.bold())
+                                Spacer()
+                                Button("清空") {
+                                    let oldEntries = library.history
+                                    for entry in oldEntries { library.removeHistory(entry.id) }
+                                }.font(.caption).foregroundStyle(.secondary)
+                            }
+                            VStack(spacing: 0) {
+                                ForEach(Array(library.history.prefix(30))) { entry in
+                                    HStack(spacing: 10) {
+                                        Image(systemName: "film").foregroundStyle(.blue)
+                                        VStack(alignment: .leading, spacing: 3) {
+                                            Text(entry.fileName).font(.subheadline.weight(.medium)).lineLimit(1)
+                                            Text(entry.completedAt.formatted(date: .numeric, time: .shortened))
+                                                .font(.caption2).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if let url = URL(string: entry.fileURL), FileManager.default.fileExists(atPath: url.path) {
+                                            Button { playingURL = url } label: { Image(systemName: "play.circle").font(.title3) }
+                                            ShareLink(item: url) { Image(systemName: "square.and.arrow.up") }
+                                        }
+                                        Button(role: .destructive) { library.removeHistory(entry.id) } label: {
+                                            Image(systemName: "trash")
+                                        }.buttonStyle(.plain)
+                                    }.padding(.vertical, 8)
+                                    if entry.id != library.history.prefix(30).last?.id { Divider() }
+                                }
+                            }
+                            .padding(.horizontal, 12)
+                            .background(.background, in: RoundedRectangle(cornerRadius: 16))
+                        }
+                    }
+
                     Label("最多 3 个任务并行；HLS 暂停后保留已下载分片，继续时从缓存恢复。切到后台会申请有限执行时间，时间耗尽后自动暂停，回到应用可继续。", systemImage: "info.circle")
                         .font(.caption).foregroundStyle(.secondary)
                 }
