@@ -76,13 +76,15 @@ final class BrowserController: ObservableObject {
         lastAddress = url.absoluteString
         navigationStartedAt = Date()
         diagnostic = "阶段：已发起请求\n地址：\(url.absoluteString)"
+        AppDiagnostics.shared.log("NAV", "手动发起导航 url=\(AppDiagnostics.safeURL(url))")
         webView?.load(URLRequest(url: url))
     }
-    func goBack() { webView?.goBack() }
-    func goForward() { webView?.goForward() }
-    func reload() { webView?.reload() }
+    func goBack() { AppDiagnostics.shared.log("NAV", "点击后退"); webView?.goBack() }
+    func goForward() { AppDiagnostics.shared.log("NAV", "点击前进"); webView?.goForward() }
+    func reload() { AppDiagnostics.shared.log("NAV", "点击刷新 url=\(AppDiagnostics.safeURL(webView?.url))"); webView?.reload() }
     func goHome() { if let url = URL(string: "https://www.google.com") { load(url) } }
     func rebuildWebView() {
+        AppDiagnostics.shared.log("WEBKIT", "请求重建 WKWebView")
         webView = nil
         lastAddress = ""
         diagnostic = "阶段：正在重建 WKWebView"
@@ -97,6 +99,7 @@ final class BrowserController: ObservableObject {
         let failedURL = value.userInfo[NSURLErrorFailingURLStringErrorKey] as? String
         diagnostic = "阶段：\(stage)\n耗时：\(elapsed)\n地址：\(view.url?.absoluteString ?? lastAddress)\n失败地址：\(failedURL ?? "未提供")\n错误域：\(value.domain)\n错误码：\(value.code)\n描述：\(value.localizedDescription)"
         isLoading = false
+        AppDiagnostics.shared.log("ERROR", "stage=\(stage) elapsed=\(elapsed) domain=\(value.domain) code=\(value.code) description=\(value.localizedDescription) failingURL=\(failedURL ?? "<nil>") userInfo=\(value.userInfo)")
     }
     func update(_ view: WKWebView) {
         canGoBack = view.canGoBack
@@ -214,7 +217,7 @@ struct BrowserView: UIViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
             let request = navigationAction.request
             let type = navigationAction.navigationType.rawValue
-            AppDiagnostics.shared.log("REQUEST", "action type=\\(type) mainFrame=\\(navigationAction.targetFrame?.isMainFrame.description ?? "nil") method=\\(request.httpMethod ?? "GET") url=\\(AppDiagnostics.safeURL(request.url))")
+            AppDiagnostics.shared.log("REQUEST", "action type=\(type) mainFrame=\\(navigationAction.targetFrame?.isMainFrame.description ?? "nil") method=\\(request.httpMethod ?? "GET") url=\\(AppDiagnostics.safeURL(request.url))")
             decisionHandler(.allow)
         }
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
