@@ -183,7 +183,7 @@ struct ContentView: View {
                         isVideoSniffingEnabled: videoSniffingEnabled,
                         isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                         isPopupBlockingEnabled: popupBlockingEnabled,
-                        customAdDomains: customAdDomains + "\n" + subscribedAdDomains + "\n" + subscribedAdCosmeticRules,
+                        customAdDomains: customAdDomains + "\n" + subscribedAdCosmeticRules,
                         isDesktopMode: browserDesktopMode,
                         stripMobilePrefix: browserStripMobilePrefix,
                         zoomLevel: browserZoomLevel
