@@ -192,7 +192,7 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         if FileManager.default.fileExists(atPath: destination.path) {
             let stem = destination.deletingPathExtension().lastPathComponent
             let ext = destination.pathExtension
-            destination = documents.appendingPathComponent("\(stem)-\(Int(Date().timeIntervalSince1970)).\(ext)")
+            destination = documents.appendingPathComponent("\(stem)-\(UUID().uuidString.prefix(8)).\(ext)")
         }
 
         do {
