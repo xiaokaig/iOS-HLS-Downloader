@@ -1,6 +1,7 @@
 import Foundation
 import Combine
 import UserNotifications
+import UIKit
 
 enum DownloadQueueState: String {
     case queued = "排队中"
@@ -71,6 +72,8 @@ final class DownloadQueueManager: ObservableObject {
     @Published private(set) var items: [DownloadQueueItem] = []
     private var activeIDs = Set<UUID>()
     private let maximumConcurrent = 3
+    private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
+    private var backgroundExpired = false
     var onCompleted: ((URL, URL?) -> Void)?
 
     var activeCount: Int { activeIDs.count }
@@ -98,6 +101,18 @@ final class DownloadQueueManager: ObservableObject {
         return item
     }
 
+    func requestNotificationPermission() {
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { _, _ in }
+    }
+
+    func applicationDidBecomeActive() {
+        backgroundExpired = false
+        for item in items where item.state == .paused && item.status == "系统后台时间到期，已暂停" {
+            item.state = .queued
+        }
+        pump()
+    }
+
     func pause(_ item: DownloadQueueItem) {
         guard item.state == .downloading else { return }
         item.state = .paused
@@ -105,6 +120,7 @@ final class DownloadQueueManager: ObservableObject {
         if let direct = item.directManager {
             direct.pause()
             activeIDs.remove(item.id)
+            finishBackgroundTaskIfIdle()
             pump()
         } else {
             item.runner?.cancel()
@@ -125,6 +141,7 @@ final class DownloadQueueManager: ObservableObject {
         item.directManager?.cancel()
         activeIDs.remove(item.id)
         item.status = "已取消"
+        finishBackgroundTaskIfIdle()
         pump()
     }
 
@@ -149,6 +166,7 @@ final class DownloadQueueManager: ObservableObject {
     }
 
     private func pump() {
+        guard !backgroundExpired else { return }
         while activeIDs.count < maximumConcurrent,
               let next = items.first(where: { $0.state == .queued }) {
             start(next)
@@ -156,6 +174,7 @@ final class DownloadQueueManager: ObservableObject {
     }
 
     private func start(_ item: DownloadQueueItem) {
+        beginBackgroundTaskIfNeeded()
         guard activeIDs.insert(item.id).inserted else { return }
         item.state = .downloading
         item.errorMessage = nil
@@ -169,7 +188,8 @@ final class DownloadQueueManager: ObservableObject {
                 } catch {
                     if error is CancellationError || Task.isCancelled {
                         self?.activeIDs.remove(item.id)
-                        if item.state == .paused { item.status = "已暂停" }
+                        if item.state == .paused && self?.backgroundExpired != true { item.status = "已暂停" }
+                        self?.finishBackgroundTaskIfIdle()
                         self?.pump()
                     } else {
                         self?.finishWithError(item, error: error)
@@ -202,6 +222,7 @@ final class DownloadQueueManager: ObservableObject {
         item.status = "下载完成"
         onCompleted?(output, item.sourceURL)
         notifyCompletion(item.title)
+        finishBackgroundTaskIfIdle()
         pump()
     }
 
@@ -212,7 +233,33 @@ final class DownloadQueueManager: ObservableObject {
             item.errorMessage = error.localizedDescription
             item.status = "下载失败：\(error.localizedDescription)"
         }
+        finishBackgroundTaskIfIdle()
         pump()
+    }
+
+    private func beginBackgroundTaskIfNeeded() {
+        guard backgroundTaskID == .invalid else { return }
+        backgroundTaskID = UIApplication.shared.beginBackgroundTask(withName: "VideoDownloads") { [weak self] in
+            Task { @MainActor in self?.expireBackgroundExecution() }
+        }
+    }
+
+    private func finishBackgroundTaskIfIdle() {
+        guard activeIDs.isEmpty, backgroundTaskID != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundTaskID)
+        backgroundTaskID = .invalid
+    }
+
+    private func expireBackgroundExecution() {
+        backgroundExpired = true
+        for item in items where item.state == .downloading {
+            item.state = .paused
+            item.status = "系统后台时间到期，已暂停"
+            item.directManager?.pause()
+            item.runner?.cancel()
+        }
+        activeIDs.removeAll()
+        finishBackgroundTaskIfIdle()
     }
 
     private func notifyCompletion(_ title: String) {
