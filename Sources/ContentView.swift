@@ -16,6 +16,8 @@ struct ContentView: View {
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
     @State private var showingBrowserCandidates = false
+    @State private var showingBrowsingHistory = false
+    @State private var showingBookmarks = false
 
     // Browser
     @State private var browserAddress = "https://"
@@ -52,16 +54,12 @@ struct ContentView: View {
                 .tag(1)
 
             filesTab
-                .tabItem { Label("历史", systemImage: "clock.arrow.circlepath") }
+                .tabItem { Label("文件", systemImage: "folder") }
                 .tag(2)
-
-            bookmarksTab
-                .tabItem { Label("书签", systemImage: "bookmark") }
-                .tag(3)
 
             settingsTab
                 .tabItem { Label("设置", systemImage: "gearshape") }
-                .tag(4)
+                .tag(3)
         }
         .tint(.blue)
         .onAppear {
@@ -124,7 +122,12 @@ struct ContentView: View {
                 .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
                 ZStack {
                     BrowserView(address: browserAddress, controller: browserController, onCapture: addCandidate,
-                                onAddressChange: { browserAddress = $0 }, isSniffingEnabled: hlsSniffingEnabled,
+                                onAddressChange: { value in
+                                    browserAddress = value
+                                    if let url = URL(string: value) {
+                                        library.recordVisit(url: url, title: url.host ?? value)
+                                    }
+                                }, isSniffingEnabled: hlsSniffingEnabled,
                                 isVideoSniffingEnabled: videoSniffingEnabled,
                                 isAdRedirectBlockingEnabled: adRedirectBlockingEnabled,
                                 isPopupBlockingEnabled: popupBlockingEnabled,
@@ -155,6 +158,8 @@ struct ContentView: View {
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
                     browserTool("house") { browserAddress = "https://www.google.com/"; browserController.goHome() }
                     Spacer(minLength: 8)
+                    browserTool("clock.arrow.circlepath") { showingBrowsingHistory = true }
+                    browserTool("bookmarks") { showingBookmarks = true }
                     Button { showingBrowserCandidates = true } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "dot.radiowaves.left.and.right")
@@ -235,7 +240,97 @@ struct ContentView: View {
                 }
                 .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
             }
+            .sheet(isPresented: $showingBrowsingHistory) { browsingHistorySheet }
+            .sheet(isPresented: $showingBookmarks) { browserBookmarksSheet }
         }
+    }
+
+    private var browsingHistorySheet: some View {
+        NavigationStack {
+            Group {
+                if library.browsingHistory.isEmpty {
+                    ContentUnavailableView("暂无浏览记录", systemImage: "clock.arrow.circlepath",
+                                           description: Text("访问过的网页会自动保存在这里。"))
+                } else {
+                    List {
+                        ForEach(library.browsingHistory) { entry in
+                            Button {
+                                openLibraryPage(entry.url)
+                                showingBrowsingHistory = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(entry.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(entry.url).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(entry.visitedAt.formatted(date: .numeric, time: .shortened))
+                                        .font(.caption2).foregroundStyle(.tertiary)
+                                }.padding(.vertical, 3)
+                            }.buttonStyle(.plain)
+                            .swipeActions {
+                                Button(role: .destructive) { library.removeBrowsingVisit(entry.id) } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }.listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("浏览历史")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { showingBrowsingHistory = false }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("清空", role: .destructive) { library.clearBrowsingHistory() }
+                        .disabled(library.browsingHistory.isEmpty)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+
+    private var browserBookmarksSheet: some View {
+        NavigationStack {
+            Group {
+                if library.bookmarks.isEmpty {
+                    ContentUnavailableView("还没有书签", systemImage: "bookmark",
+                                           description: Text("浏览网页时点击地址栏旁的书签图标即可收藏。"))
+                } else {
+                    List {
+                        ForEach(library.bookmarks) { bookmark in
+                            Button {
+                                openLibraryPage(bookmark.url)
+                                showingBookmarks = false
+                            } label: {
+                                VStack(alignment: .leading, spacing: 5) {
+                                    Text(bookmark.title).font(.subheadline.weight(.semibold)).lineLimit(1)
+                                    Text(bookmark.url).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                }.padding(.vertical, 4)
+                            }.buttonStyle(.plain)
+                            .swipeActions {
+                                Button(role: .destructive) { library.removeBookmark(bookmark.id) } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }.listStyle(.insetGrouped)
+                }
+            }
+            .navigationTitle("书签")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("关闭") { showingBookmarks = false }
+                }
+            }
+        }
+        .presentationDetents([.medium, .large]).presentationDragIndicator(.visible)
+    }
+
+    private func openLibraryPage(_ value: String) {
+        guard let url = URL(string: value) else { return }
+        browserAddress = url.absoluteString
+        browserController.load(url)
     }
 
     private func browserTool(_ symbol: String, disabled: Bool = false, action: @escaping () -> Void) -> some View {
@@ -385,48 +480,6 @@ struct ContentView: View {
         }
     }
 
-    private var bookmarksTab: some View {
-        NavigationStack {
-            Group {
-                if library.bookmarks.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "bookmark").font(.system(size: 42)).foregroundStyle(.tertiary)
-                        Text("还没有书签").font(.headline)
-                        Text("浏览网页时点击地址栏旁的书签图标即可收藏。")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color(uiColor: .systemGroupedBackground))
-                } else {
-                    List {
-                        ForEach(library.bookmarks) { bookmark in
-                            Button {
-                                guard let url = URL(string: bookmark.url) else { return }
-                                selectedTab = 0
-                                browserAddress = url.absoluteString
-                                browserController.load(url)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 5) {
-                                    Text(bookmark.title).font(.subheadline.weight(.semibold)).lineLimit(1)
-                                    Text(bookmark.url).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .buttonStyle(.plain)
-                            .swipeActions {
-                                Button(role: .destructive) {
-                                    library.removeBookmark(bookmark.id)
-                                } label: { Label("删除", systemImage: "trash") }
-                            }
-                        }
-                    }
-                    .listStyle(.insetGrouped)
-                }
-            }
-            .navigationTitle("书签")
-        }
-    }
-
     private var filesTab: some View {
         NavigationStack {
             Group {
@@ -483,7 +536,7 @@ struct ContentView: View {
                     .refreshable { refreshFiles() }
                 }
             }
-            .navigationTitle("下载历史")
+            .navigationTitle("已下载")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button(action: refreshFiles) {

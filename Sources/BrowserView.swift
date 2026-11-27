@@ -563,10 +563,14 @@ struct BrowserView: UIViewRepresentable {
                 return
             }
             if isNewWindow {
-                AppDiagnostics.shared.log("NAV", "网页请求新窗口，交由当前标签打开 url=\(AppDiagnostics.safeURL(url))")
+                // Do not let WebKit create a secondary page. Loading it here keeps
+                // the navigation in this WKWebView and avoids returning this same
+                // WKWebView from createWebViewWith (which can abort the app).
+                AppDiagnostics.shared.log("NAV", "新窗口请求转为当前标签导航 url=\(AppDiagnostics.safeURL(url))")
+                webView.load(navigationAction.request)
+                decisionHandler(.cancel)
+                return
             }
-            // WebKit owns links, redirects, forms, history and frame navigation.
-            // Never call load() from this callback.
             decisionHandler(.allow)
         }
 
@@ -577,10 +581,12 @@ struct BrowserView: UIViewRepresentable {
             windowFeatures: WKWindowFeatures
         ) -> WKWebView? {
             guard navigationAction.targetFrame == nil else { return nil }
-            guard let url = navigationAction.request.url else { return nil }
-            if shouldBlock(url, isNewWindow: true, isMainFrame: true) { return nil }
-            AppDiagnostics.shared.log("NAV", "window.open 在当前标签承载 url=\(AppDiagnostics.safeURL(url))")
-            return webView
+            if let url = navigationAction.request.url {
+                AppDiagnostics.shared.log("NAV", "拒绝创建独立网页窗口（已由导航策略转入当前标签） url=\(AppDiagnostics.safeURL(url))")
+            }
+            // Returning the existing webView here is invalid: WebKit expects a
+            // newly-created view using the supplied configuration, or nil.
+            return nil
         }
 
         func webView(
@@ -611,7 +617,6 @@ struct BrowserView: UIViewRepresentable {
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
             controller.recordStage("页面开始呈现", view: webView)
             controller.update(webView)
-            if let url = webView.url { onAddressChange(url.absoluteString) }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {

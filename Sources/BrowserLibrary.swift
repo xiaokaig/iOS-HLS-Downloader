@@ -8,6 +8,13 @@ struct BrowserBookmark: Identifiable, Codable, Equatable {
     var createdAt = Date()
 }
 
+struct BrowsingHistoryEntry: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var title: String
+    var url: String
+    var visitedAt = Date()
+}
+
 struct DownloadHistoryEntry: Identifiable, Codable, Equatable {
     var id = UUID()
     var fileName: String
@@ -19,14 +26,38 @@ struct DownloadHistoryEntry: Identifiable, Codable, Equatable {
 @MainActor
 final class BrowserLibraryStore: ObservableObject {
     @Published private(set) var bookmarks: [BrowserBookmark] = []
+    @Published private(set) var browsingHistory: [BrowsingHistoryEntry] = []
     @Published private(set) var history: [DownloadHistoryEntry] = []
 
     private let bookmarksKey = "browserBookmarks.v1"
+    private let browsingHistoryKey = "browsingHistory.v1"
     private let historyKey = "downloadHistory.v1"
 
     init() {
         bookmarks = Self.load([BrowserBookmark].self, key: bookmarksKey, defaultValue: [])
+        browsingHistory = Self.load([BrowsingHistoryEntry].self, key: browsingHistoryKey, defaultValue: [])
         history = Self.load([DownloadHistoryEntry].self, key: historyKey, defaultValue: [])
+    }
+
+    func recordVisit(url: URL, title: String) {
+        let value = url.absoluteString
+        if let first = browsingHistory.first, first.url == value,
+           Date().timeIntervalSince(first.visitedAt) < 3 {
+            return
+        }
+        browsingHistory.insert(BrowsingHistoryEntry(title: title, url: value), at: 0)
+        if browsingHistory.count > 500 { browsingHistory = Array(browsingHistory.prefix(500)) }
+        persist(browsingHistory, key: browsingHistoryKey)
+    }
+
+    func removeBrowsingVisit(_ id: UUID) {
+        browsingHistory.removeAll { $0.id == id }
+        persist(browsingHistory, key: browsingHistoryKey)
+    }
+
+    func clearBrowsingHistory() {
+        browsingHistory.removeAll()
+        persist(browsingHistory, key: browsingHistoryKey)
     }
 
     func isBookmarked(_ url: URL) -> Bool {
