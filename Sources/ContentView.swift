@@ -18,7 +18,7 @@ struct ContentView: View {
     @AppStorage("browserStripMobilePrefix") private var browserStripMobilePrefix = false
     @AppStorage("browserZoomLevel") private var browserZoomLevel = 1.0
     @AppStorage("hlsSniffingEnabled") private var hlsSniffingEnabled = true
-    @AppStorage("videoSniffingEnabled") private var videoSniffingEnabled = false
+    @AppStorage("videoSniffingEnabled") private var videoSniffingEnabled = true
     @AppStorage("adRedirectBlockingEnabled") private var adRedirectBlockingEnabled = false
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
@@ -37,6 +37,7 @@ struct ContentView: View {
     @State private var candidates: [URL] = []
     @State private var candidateCookies: [String: [HTTPCookie]] = [:]
     @State private var candidateMetadata: [String: String] = [:]
+    @State private var candidateSizes: [String: Int64] = [:]
 
     // Direct download / quality picker
     @State private var directURL = ""
@@ -246,7 +247,7 @@ struct ContentView: View {
                             .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }.frame(maxWidth: .infinity).padding(.vertical, 28)
                 } else {
-                    ForEach(candidates, id: \.absoluteString) { url in
+                    ForEach(sortedCandidates, id: \.absoluteString) { url in
                         VStack(alignment: .leading, spacing: 8) {
                             HStack {
                                 Image(systemName: "film").foregroundStyle(.blue)
@@ -287,6 +288,7 @@ struct ContentView: View {
                         candidates.removeAll()
                         candidateCookies.removeAll()
                         candidateMetadata.removeAll()
+                        candidateSizes.removeAll()
                     }.disabled(candidates.isEmpty)
                 }
             }
@@ -943,6 +945,7 @@ struct ContentView: View {
                 let removedKey = candidateKey(item)
                 candidateCookies.removeValue(forKey: removedKey)
                 candidateMetadata.removeValue(forKey: removedKey)
+                candidateSizes.removeValue(forKey: removedKey)
             }
             candidates = Array(candidates.prefix(20))
         }
@@ -962,24 +965,40 @@ struct ContentView: View {
                         request.setValue(value, forHTTPHeaderField: name)
                     }
                 }
+                var bytes: Int64 = -1
                 do {
                     let (_, response) = try await URLSession.shared.data(for: request)
-                    let bytes = response.expectedContentLength
-                    await MainActor.run {
-                        guard candidates.contains(where: { candidateKey($0) == key }) else { return }
-                        if bytes > 0 {
-                            let formatter = ByteCountFormatter()
-                            formatter.countStyle = .file
-                            candidateMetadata[key] = "普通视频直链 · " + formatter.string(fromByteCount: bytes)
-                        } else {
-                            candidateMetadata[key] = "普通视频直链 · 大小未知"
+                    bytes = response.expectedContentLength
+                    if let http = response as? HTTPURLResponse,
+                       let raw = http.value(forHTTPHeaderField: "Content-Length"),
+                       let value = Int64(raw), value > 0 { bytes = value }
+                } catch {}
+                if bytes <= 0 {
+                    var rangeRequest = URLRequest(url: url)
+                    rangeRequest.httpMethod = "GET"
+                    rangeRequest.setValue("bytes=0-0", forHTTPHeaderField: "Range")
+                    rangeRequest.timeoutInterval = 12
+                    if let page = currentPageURL { rangeRequest.setValue(page.absoluteString, forHTTPHeaderField: "Referer") }
+                    do {
+                        let (_, response) = try await URLSession.shared.data(for: rangeRequest)
+                        if let http = response as? HTTPURLResponse,
+                           let range = http.value(forHTTPHeaderField: "Content-Range"),
+                           let total = Int64(range.split(separator: "/").last ?? ""), total > 0 {
+                            bytes = total
+                        } else if response.expectedContentLength > 1 {
+                            bytes = response.expectedContentLength
                         }
-                    }
-                } catch {
-                    await MainActor.run {
-                        if candidates.contains(where: { candidateKey($0) == key }) {
-                            candidateMetadata[key] = "普通视频直链 · 大小未知"
-                        }
+                    } catch {}
+                }
+                await MainActor.run {
+                    guard candidates.contains(where: { candidateKey($0) == key }) else { return }
+                    if bytes > 0 {
+                        candidateSizes[key] = bytes
+                        let formatter = ByteCountFormatter()
+                        formatter.countStyle = .file
+                        candidateMetadata[key] = "普通视频直链 · " + formatter.string(fromByteCount: bytes)
+                    } else {
+                        candidateMetadata[key] = "普通视频直链 · 大小未知"
                     }
                 }
             }
@@ -1013,6 +1032,15 @@ struct ContentView: View {
                     candidateMetadata[key] = "暂时无法读取播放列表"
                 }
             }
+        }
+    }
+
+    private var sortedCandidates: [URL] {
+        candidates.sorted { left, right in
+            let leftSize = candidateSizes[candidateKey(left)] ?? -1
+            let rightSize = candidateSizes[candidateKey(right)] ?? -1
+            if leftSize != rightSize { return leftSize > rightSize }
+            return left.absoluteString < right.absoluteString
         }
     }
 
