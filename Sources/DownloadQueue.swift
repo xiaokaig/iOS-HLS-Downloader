@@ -154,6 +154,13 @@ final class DownloadQueueManager: ObservableObject {
         guard item.state == .downloading || item.state == .queued || item.state == .paused else { return }
         item.state = .cancelled
         item.runner?.cancel()
+        if let hls = item.hlsManager {
+            let runner = item.runner
+            Task {
+                await runner?.value
+                hls.discardResumeCache()
+            }
+        }
         item.directManager?.cancel()
         activeIDs.remove(item.id)
         item.status = "已取消"
