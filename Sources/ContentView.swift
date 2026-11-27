@@ -28,6 +28,11 @@ struct ContentView: View {
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
     @AppStorage("browserHomePage") private var browserHomePage = "start"
     @AppStorage("browserCustomHomeURL") private var browserCustomHomeURL = ""
+    @AppStorage("browserMenuDownloadOrder") private var browserMenuDownloadOrder = "downloads,files"
+    @AppStorage("browserMenuBrowserOrder") private var browserMenuBrowserOrder = "history,bookmarks,sniff,share"
+    @AppStorage("browserMenuDisplayOrder") private var browserMenuDisplayOrder = "desktop,strip,zoom"
+    @AppStorage("browserMenuActionOrder") private var browserMenuActionOrder = "refresh,copy,settings"
+    @State private var menuEditMode: EditMode = .inactive
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
     @State private var showingBookmarks = false
@@ -299,50 +304,123 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("下载器") {
-                    NavigationLink { downloadsTab } label: {
-                        Label("下载管理 · 解析与下载任务", systemImage: "arrow.down.circle.fill")
+                    ForEach(orderedMenuItems(browserMenuDownloadOrder, defaults: ["downloads", "files"]), id: \.self) { item in
+                        browserMenuRow(item)
+                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
-                    NavigationLink { filesTab } label: {
-                        Label("已下载文件", systemImage: "folder")
+                    .onMove { source, destination in
+                        moveMenuItems(source, to: destination, raw: browserMenuDownloadOrder, defaults: ["downloads", "files"]) {
+                            browserMenuDownloadOrder = $0
+                        }
                     }
                 }
                 Section("浏览器") {
-                    menuAction("历史记录", icon: "clock.arrow.circlepath") { showingBrowserMenu = false; showingBrowsingHistory = true }
-                    menuAction("书签", icon: "bookmark") { showingBrowserMenu = false; showingBookmarks = true }
-                    menuAction("视频嗅探（\(candidates.count)）", icon: "dot.radiowaves.left.and.right") { showingBrowserMenu = false; showingBrowserCandidates = true }
-                    menuAction("分享网页", icon: "square.and.arrow.up") {
-                        if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
-                        showingBrowserMenu = false
+                    ForEach(orderedMenuItems(browserMenuBrowserOrder, defaults: ["history", "bookmarks", "sniff", "share"]), id: \.self) { item in
+                        browserMenuRow(item)
+                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
+                    }
+                    .onMove { source, destination in
+                        moveMenuItems(source, to: destination, raw: browserMenuBrowserOrder, defaults: ["history", "bookmarks", "sniff", "share"]) {
+                            browserMenuBrowserOrder = $0
+                        }
                     }
                 }
                 Section("网页显示") {
-                    Toggle("桌面版网站", isOn: $browserDesktopMode)
-                        .onChange(of: browserDesktopMode) { _ in browserController.reload() }
-                    Toggle("桌面版时去除 m. 前缀", isOn: $browserStripMobilePrefix)
-                        .disabled(!browserDesktopMode)
-                    HStack {
-                        Text("网页缩放")
-                        Spacer()
-                        Button { browserZoomLevel = max(0.5, browserZoomLevel - 0.1); applyBrowserZoom() } label: { Image(systemName: "minus.circle") }
-                        Text("\(Int(browserZoomLevel * 100))%").monospacedDigit().frame(minWidth: 48)
-                        Button { browserZoomLevel = min(2.0, browserZoomLevel + 0.1); applyBrowserZoom() } label: { Image(systemName: "plus.circle") }
-                        Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
+                    ForEach(orderedMenuItems(browserMenuDisplayOrder, defaults: ["desktop", "strip", "zoom"]), id: \.self) { item in
+                        browserMenuRow(item)
+                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
+                    }
+                    .onMove { source, destination in
+                        moveMenuItems(source, to: destination, raw: browserMenuDisplayOrder, defaults: ["desktop", "strip", "zoom"]) {
+                            browserMenuDisplayOrder = $0
+                        }
                     }
                 }
                 Section("页面操作") {
-                    menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
-                    menuAction("复制当前网址", icon: "doc.on.doc") {
-                        if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
-                        showingBrowserMenu = false
+                    ForEach(orderedMenuItems(browserMenuActionOrder, defaults: ["refresh", "copy", "settings"]), id: \.self) { item in
+                        browserMenuRow(item)
+                            .onLongPressGesture(minimumDuration: 0.45) { menuEditMode = .active }
                     }
-                    NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
+                    .onMove { source, destination in
+                        moveMenuItems(source, to: destination, raw: browserMenuActionOrder, defaults: ["refresh", "copy", "settings"]) {
+                            browserMenuActionOrder = $0
+                        }
+                    }
                 }
             }
+            .environment(\.editMode, $menuEditMode)
             .listStyle(.insetGrouped)
             .navigationTitle("浏览器菜单")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("完成") { showingBrowserMenu = false } } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button(menuEditMode == .active ? "完成排序" : "长按排序") {
+                        menuEditMode = menuEditMode == .active ? .inactive : .active
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showingBrowserMenu = false; menuEditMode = .inactive }
+                }
+            }
         }
+    }
+
+    @ViewBuilder
+    private func browserMenuRow(_ item: String) -> some View {
+        switch item {
+        case "downloads":
+            NavigationLink { downloadsTab } label: { Label("下载管理 · 解析与下载任务", systemImage: "arrow.down.circle.fill") }
+        case "files":
+            NavigationLink { filesTab } label: { Label("已下载文件", systemImage: "folder") }
+        case "history":
+            menuAction("历史记录", icon: "clock.arrow.circlepath") { showingBrowserMenu = false; showingBrowsingHistory = true }
+        case "bookmarks":
+            menuAction("书签", icon: "bookmark") { showingBrowserMenu = false; showingBookmarks = true }
+        case "sniff":
+            menuAction("视频嗅探（\(candidates.count)）", icon: "dot.radiowaves.left.and.right") { showingBrowserMenu = false; showingBrowserCandidates = true }
+        case "share":
+            menuAction("分享网页", icon: "square.and.arrow.up") {
+                if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
+                showingBrowserMenu = false
+            }
+        case "desktop":
+            Toggle("桌面版网站", isOn: $browserDesktopMode)
+                .onChange(of: browserDesktopMode) { _ in browserController.reload() }
+        case "strip":
+            Toggle("桌面版时去除 m. 前缀", isOn: $browserStripMobilePrefix)
+                .disabled(!browserDesktopMode)
+        case "zoom":
+            HStack {
+                Text("网页缩放")
+                Spacer()
+                Button { browserZoomLevel = max(0.5, browserZoomLevel - 0.1); applyBrowserZoom() } label: { Image(systemName: "minus.circle") }
+                Text("\(Int(browserZoomLevel * 100))%").monospacedDigit().frame(minWidth: 48)
+                Button { browserZoomLevel = min(2.0, browserZoomLevel + 0.1); applyBrowserZoom() } label: { Image(systemName: "plus.circle") }
+                Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
+            }
+        case "refresh":
+            menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
+        case "copy":
+            menuAction("复制当前网址", icon: "doc.on.doc") {
+                if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
+                showingBrowserMenu = false
+            }
+        case "settings":
+            NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
+        default:
+            EmptyView()
+        }
+    }
+
+    private func orderedMenuItems(_ raw: String, defaults: [String]) -> [String] {
+        let saved = raw.split(separator: ",").map(String.init)
+        return saved.filter { defaults.contains($0) } + defaults.filter { !saved.contains($0) }
+    }
+
+    private func moveMenuItems(_ source: IndexSet, to destination: Int, raw: String, defaults: [String], save: (String) -> Void) {
+        var items = orderedMenuItems(raw, defaults: defaults)
+        items.move(fromOffsets: source, toOffset: destination)
+        save(items.joined(separator: ","))
     }
 
     private var tabOverviewSheet: some View {
