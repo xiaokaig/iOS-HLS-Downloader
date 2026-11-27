@@ -2,6 +2,66 @@ import SwiftUI
 import WebKit
 
 @MainActor
+final class AppDiagnostics: ObservableObject {
+    static let shared = AppDiagnostics()
+    @Published private(set) var recentText = "日志初始化中"
+    private let fileURL: URL
+    private let maxBytes = 2 * 1024 * 1024
+
+    private init() {
+        let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        fileURL = documents.appendingPathComponent("app-diagnostics.log")
+        if !FileManager.default.fileExists(atPath: fileURL.path) {
+            FileManager.default.createFile(atPath: fileURL.path, contents: nil)
+        }
+        refresh()
+        log("APP", "诊断日志启动；日志文件：app-diagnostics.log")
+    }
+
+    func log(_ category: String, _ message: String) {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let line = "[\(formatter.string(from: Date()))] [\(category)] \(message)\n"
+        guard let data = line.data(using: .utf8) else { return }
+        do {
+            let size = ((try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)
+            if size + data.count > maxBytes {
+                try Data().write(to: fileURL, options: .atomic)
+                let marker = "[\(formatter.string(from: Date()))] [LOG] 日志达到 2MB，已滚动清理旧记录\n"
+                try marker.data(using: .utf8)?.write(to: fileURL, options: .atomic)
+            }
+            let handle = try FileHandle(forWritingTo: fileURL)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: data)
+            try handle.close()
+        } catch { NSLog("Diagnostics write failed: %@", error.localizedDescription) }
+        refresh()
+    }
+
+    func refresh() {
+        guard let data = try? Data(contentsOf: fileURL), let value = String(data: data, encoding: .utf8) else { return }
+        recentText = String(value.suffix(24000))
+    }
+
+    func copyAll() -> String {
+        (try? String(contentsOf: fileURL, encoding: .utf8)) ?? recentText
+    }
+
+    func exportURL() -> URL { fileURL }
+
+    static func safeURL(_ url: URL?) -> String {
+        guard var components = url.flatMap({ URLComponents(url: $0, resolvingAgainstBaseURL: false) }) else { return url?.absoluteString ?? "<nil>" }
+        if components.user != nil { components.user = "[redacted]" }
+        if components.password != nil { components.password = "[redacted]" }
+        let sensitive = ["token", "access_token", "auth", "authorization", "key", "api_key", "password", "sign", "signature"]
+        components.queryItems = components.queryItems?.map { item in
+            sensitive.contains(item.name.lowercased()) ? URLQueryItem(name: item.name, value: "[redacted]") : item
+        }
+        return components.string ?? url?.absoluteString ?? "<invalid-url>"
+    }
+}
+
+@MainActor
 final class BrowserController: ObservableObject {
     @Published private(set) var canGoBack = false
     @Published private(set) var canGoForward = false
@@ -151,18 +211,40 @@ struct BrowserView: UIViewRepresentable {
                 DispatchQueue.main.async { self?.onCapture(url, cookies) }
             }
         }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            let request = navigationAction.request
+            let type = navigationAction.navigationType.rawValue
+            AppDiagnostics.shared.log("REQUEST", "action type=\\(type) mainFrame=\\(navigationAction.targetFrame?.isMainFrame.description ?? "nil") method=\\(request.httpMethod ?? "GET") url=\\(AppDiagnostics.safeURL(request.url))")
+            decisionHandler(.allow)
+        }
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            if let response = navigationResponse.response as? HTTPURLResponse {
+                let headers = response.allHeaderFields.reduce(into: [String: String]()) { result, pair in
+                    let key = String(describing: pair.key)
+                    if !["set-cookie", "authorization", "www-authenticate"].contains(key.lowercased()) { result[key] = String(describing: pair.value) }
+                }
+                AppDiagnostics.shared.log("RESPONSE", "status=\\(response.statusCode) mime=\\(response.mimeType ?? "nil") expectedLength=\\(response.expectedContentLength) mainFrame=\\(navigationResponse.isForMainFrame) url=\\(AppDiagnostics.safeURL(response.url)) headers=\\(headers)")
+            } else {
+                AppDiagnostics.shared.log("RESPONSE", "non-HTTP response mainFrame=\\(navigationResponse.isForMainFrame) url=\\(AppDiagnostics.safeURL(navigationResponse.response.url))")
+            }
+            decisionHandler(.allow)
+        }
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+            AppDiagnostics.shared.log("NAV", "didStartProvisionalNavigation url=\\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("开始连接 / DNS / TLS", view: webView)
             controller.update(webView)
         }
         func webView(_ webView: WKWebView, didReceiveServerRedirectForProvisionalNavigation navigation: WKNavigation!) {
+            AppDiagnostics.shared.log("NAV", "服务器重定向 currentURL=\\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("收到服务器重定向", view: webView)
         }
         func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+            AppDiagnostics.shared.log("NAV", "didCommit url=\\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("已收到页面内容，开始提交", view: webView)
             controller.update(webView)
         }
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            AppDiagnostics.shared.log("NAV", "didFinish url=\\(AppDiagnostics.safeURL(webView.url)) title=\\(webView.title ?? "")")
             controller.recordStage("加载完成", view: webView)
             controller.update(webView)
             if let url = webView.url { onAddressChange(url.absoluteString) }
@@ -176,6 +258,7 @@ struct BrowserView: UIViewRepresentable {
             controller.update(webView)
         }
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            AppDiagnostics.shared.log("WEBKIT", "WebContent 进程意外终止 url=\\(AppDiagnostics.safeURL(webView.url))")
             controller.recordStage("WebContent 进程意外终止", view: webView)
             controller.update(webView)
         }
