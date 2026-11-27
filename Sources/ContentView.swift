@@ -15,6 +15,7 @@ struct ContentView: View {
     @State private var browserAddress = "https://"
     @State private var candidates: [URL] = []
     @State private var candidateCookies: [String: [HTTPCookie]] = [:]
+    @State private var candidateMetadata: [String: String] = [:]
 
     // Direct download / quality picker
     @State private var directURL = ""
@@ -167,6 +168,8 @@ struct ContentView: View {
                                         .buttonStyle(.borderedProminent).controlSize(.small)
                                     }
                                     Text(url.host ?? url.absoluteString).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                                    Text(candidateMetadata[candidateKey(url)] ?? "正在识别播放列表…")
+                                        .font(.caption).foregroundStyle(.blue)
                                     Button { UIPasteboard.general.string = url.absoluteString } label: {
                                         Label("复制地址", systemImage: "doc.on.doc")
                                     }.font(.caption)
@@ -178,7 +181,11 @@ struct ContentView: View {
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) { Button("关闭") { showingBrowserCandidates = false } }
                         ToolbarItem(placement: .topBarTrailing) {
-                            Button("清空") { candidates.removeAll(); candidateCookies.removeAll() }.disabled(candidates.isEmpty)
+                            Button("清空") {
+                                candidates.removeAll()
+                                candidateCookies.removeAll()
+                                candidateMetadata.removeAll()
+                            }.disabled(candidates.isEmpty)
                         }
                     }
                 }
@@ -499,11 +506,58 @@ struct ContentView: View {
         }
     }
 
+    private func candidateKey(_ url: URL) -> String {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            return url.absoluteString
+        }
+        components.scheme = components.scheme?.lowercased()
+        components.host = components.host?.lowercased()
+        components.fragment = nil
+        if (components.scheme == "https" && components.port == 443) ||
+            (components.scheme == "http" && components.port == 80) {
+            components.port = nil
+        }
+        return components.string ?? url.absoluteString
+    }
+
     private func addCandidate(_ url: URL, cookies: [HTTPCookie]) {
-        candidateCookies[url.absoluteString] = cookies
-        guard !candidates.contains(where: { $0.absoluteString == url.absoluteString }) else { return }
+        let key = candidateKey(url)
+        candidateCookies[key] = cookies
+        guard !candidates.contains(where: { candidateKey($0) == key }) else { return }
         candidates.insert(url, at: 0)
-        if candidates.count > 20 { candidates.removeLast(candidates.count - 20) }
+        candidateMetadata[key] = "正在识别播放列表…"
+        if candidates.count > 20 {
+            let removed = candidates.suffix(from: 20)
+            for item in removed {
+                let removedKey = candidateKey(item)
+                candidateCookies.removeValue(forKey: removedKey)
+                candidateMetadata.removeValue(forKey: removedKey)
+            }
+            candidates = Array(candidates.prefix(20))
+        }
+
+        Task {
+            do {
+                let result = try await downloader.inspectPlaylist(url, cookies: cookies)
+                if !result.variants.isEmpty {
+                    candidateMetadata[key] = "主播放列表 · \(result.variants.count) 个清晰度"
+                    for variant in result.variants {
+                        let variantKey = candidateKey(variant.url)
+                        let resolution = variant.resolution ?? "分辨率未知"
+                        let bitrate = variant.bandwidth > 0
+                            ? String(format: "%.2f Mbps", Double(variant.bandwidth) / 1_000_000)
+                            : "码率未知"
+                        candidateMetadata[variantKey] = "\(resolution) · \(bitrate)"
+                    }
+                } else if result.segmentCount > 0 {
+                    candidateMetadata[key] = "媒体播放列表 · \(result.segmentCount) 个分片"
+                } else {
+                    candidateMetadata[key] = "播放列表已读取，未发现清晰度信息"
+                }
+            } catch {
+                candidateMetadata[key] = "暂时无法读取播放列表"
+            }
+        }
     }
 
     private func loadBrowserAddress() {
