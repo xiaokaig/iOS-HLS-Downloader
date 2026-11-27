@@ -219,18 +219,18 @@ struct ContentView: View {
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
                     browserTool("house") { openHomePage() }
                     Button { captureTabPreviews(); showingTabOverview = true } label: {
-                        ZStack(alignment: .topTrailing) {
-                            Image(systemName: "square.on.square")
+                        ZStack {
+                            Image(systemName: "square")
                                 .font(.system(size: 19, weight: .medium))
-                                .frame(maxWidth: .infinity, minHeight: 48)
-                            Text("\(tabManager.tabs.count)")
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 4)
-                                .frame(minWidth: 15, minHeight: 15)
-                                .background(.blue, in: Capsule())
-                                .offset(x: -8, y: 5)
+                            if tabManager.tabs.count > 1 {
+                                Text("\(tabManager.tabs.count)")
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundStyle(.primary)
+                                    .minimumScaleFactor(0.7)
+                                    .lineLimit(1)
+                            }
                         }
+                        .frame(maxWidth: .infinity, minHeight: 48)
                     }
                     .buttonStyle(.plain)
                     Button { showingBrowserMenu = true } label: {
