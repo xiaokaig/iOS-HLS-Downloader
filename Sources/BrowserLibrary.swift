@@ -98,6 +98,13 @@ final class BrowserLibraryStore: ObservableObject {
         persist(history, key: historyKey)
     }
 
+    func reconcileDownloadHistory(existingFileURLs: Set<String>) {
+        let reconciled = history.filter { existingFileURLs.contains($0.fileURL) }
+        guard reconciled.count != history.count else { return }
+        history = reconciled
+        persist(history, key: historyKey)
+    }
+
     private static func load<T: Decodable>(_ type: T.Type, key: String, defaultValue: T) -> T {
         guard let data = UserDefaults.standard.data(forKey: key),
               let value = try? JSONDecoder().decode(type, from: data) else { return defaultValue }
