@@ -52,8 +52,14 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
             let manager = HLSDownloadManager()
             hlsManager = manager
             directManager = nil
-            manager.$progress.receive(on: DispatchQueue.main).sink { [weak self] in self?.progress = $0 }.store(in: &cancellables)
-            manager.$status.receive(on: DispatchQueue.main).sink { [weak self] in self?.status = $0 }.store(in: &cancellables)
+            manager.$progress.receive(on: DispatchQueue.main).sink { [weak self] in
+                guard self?.state == .downloading else { return }
+                self?.progress = $0
+            }.store(in: &cancellables)
+            manager.$status.receive(on: DispatchQueue.main).sink { [weak self] in
+                guard self?.state == .downloading else { return }
+                self?.status = $0
+            }.store(in: &cancellables)
         case .direct:
             let manager = DirectVideoDownloadManager()
             hlsManager = nil
