@@ -318,7 +318,7 @@ struct BrowserView: UIViewRepresentable {
     })();
     """
 
-    private static let videoSniffingScript = """
+    private static let videoSniffingScript = #"""
     (() => {
       if (window.__videoSnifferInstalled) return;
       window.__videoSnifferInstalled = true;
@@ -373,7 +373,7 @@ struct BrowserView: UIViewRepresentable {
       } catch (_) {}
       scan();
     })();
-    """
+    """#
 
     func makeCoordinator() -> Coordinator {
         Coordinator(
