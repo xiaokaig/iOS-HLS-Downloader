@@ -563,7 +563,7 @@ struct BrowserView: UIViewRepresentable {
             let rules: [[String: Any]] = subset.map { domain in
                 let escaped = NSRegularExpression.escapedPattern(for: domain)
                 return [
-                    "trigger": ["url-filter": "^https?://([^/]+\\.)*\(escaped)([/:?#]|$)"],
+                    "trigger": ["url-filter": "^https?://([^/]+\\.)?\(escaped)([/:?#]|$)"],
                     "action": ["type": "block"]
                 ]
             }
@@ -705,7 +705,7 @@ struct BrowserView: UIViewRepresentable {
         // Keep media inside the page: website controls and player remain in charge.
         configuration.allowsInlineMediaPlayback = true
         configuration.allowsAirPlayForMediaPlayback = true
-        configuration.mediaTypesRequiringUserActionForPlayback = []
+        configuration.mediaTypesRequiringUserActionForPlayback = .all
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -737,6 +737,7 @@ struct BrowserView: UIViewRepresentable {
         context.coordinator.onNewTab = onNewTab
         context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
         context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
+        let cosmeticRulesChanged = context.coordinator.customAdDomains != customAdDomains
         context.coordinator.customAdDomains = customAdDomains
         installContentRules(in: webView.configuration.userContentController, coordinator: context.coordinator)
         let desktopModeChanged = context.coordinator.isDesktopMode != isDesktopMode
@@ -760,7 +761,7 @@ struct BrowserView: UIViewRepresentable {
         // All user navigation is routed explicitly through BrowserController.
         let sniffingChanged = context.coordinator.isSniffingEnabled != isSniffingEnabled
         let videoSniffingChanged = context.coordinator.isVideoSniffingEnabled != isVideoSniffingEnabled
-        if sniffingChanged || videoSniffingChanged {
+        if sniffingChanged || videoSniffingChanged || cosmeticRulesChanged {
             context.coordinator.isSniffingEnabled = isSniffingEnabled
             context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
             let contentController = webView.configuration.userContentController
@@ -772,7 +773,7 @@ struct BrowserView: UIViewRepresentable {
                 contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
             installCosmeticRules(in: contentController)
-            AppDiagnostics.shared.log("SNIFF", "嗅探开关切换 HLS=\(isSniffingEnabled) 普通视频=\(isVideoSniffingEnabled)")
+            AppDiagnostics.shared.log("SNIFF", "脚本更新 HLS=\(isSniffingEnabled) 普通视频=\(isVideoSniffingEnabled) 元素规则变化=\(cosmeticRulesChanged)")
             if webView.url != nil { webView.reload() }
         }
     }
