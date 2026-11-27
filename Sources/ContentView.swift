@@ -20,6 +20,8 @@ struct ContentView: View {
     @AppStorage("popupBlockingEnabled") private var popupBlockingEnabled = false
     @AppStorage("customAdDomains") private var customAdDomains = ""
     @AppStorage("defaultSearchEngine") private var defaultSearchEngine = "bing"
+    @AppStorage("browserHomePage") private var browserHomePage = "start"
+    @AppStorage("browserCustomHomeURL") private var browserCustomHomeURL = ""
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
     @State private var showingBookmarks = false
@@ -146,11 +148,23 @@ struct ContentView: View {
                                 Text("轻装上网").font(.title3.weight(.semibold))
                                 Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
                             }
-                            HStack(spacing: 14) {
-                                browserShortcut("百度", icon: "magnifyingglass", url: "https://www.baidu.com")
-                                browserShortcut("必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com")
-                                browserShortcut("GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
-                                browserShortcut("YouTube", icon: "play.rectangle", url: "https://www.youtube.com")
+                            VStack(spacing: 12) {
+                                HStack(spacing: 12) {
+                                    browserLibraryTool("下载管理", symbol: "arrow.down.circle.fill") {
+                                        showingBrowserMenu = false
+                                        browserMenuRoute = .downloads
+                                    }
+                                    browserLibraryTool("已下载文件", symbol: "folder.fill") {
+                                        showingBrowserMenu = false
+                                        browserMenuRoute = .files
+                                    }
+                                }
+                                HStack(spacing: 14) {
+                                    browserShortcut("百度", icon: "magnifyingglass", url: "https://www.baidu.com")
+                                    browserShortcut("必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com")
+                                    browserShortcut("GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
+                                    browserShortcut("YouTube", icon: "play.rectangle", url: "https://www.youtube.com")
+                                }
                             }
                             Spacer()
                         }
@@ -163,7 +177,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
-                    browserTool("house") { browserAddress = ""; browserController.goHome() }
+                    browserTool("house") { openHomePage() }
                     Button { showingTabOverview = true } label: {
                         Image(systemName: "square.on.square")
                             .font(.system(size: 19, weight: .medium))
@@ -267,6 +281,14 @@ struct ContentView: View {
     private var browserMenuSheet: some View {
         NavigationStack {
             List {
+                Section("下载器") {
+                    NavigationLink { downloadsTab } label: {
+                        Label("下载管理 · 解析与下载任务", systemImage: "arrow.down.circle.fill")
+                    }
+                    NavigationLink { filesTab } label: {
+                        Label("已下载文件", systemImage: "folder")
+                    }
+                }
                 Section("浏览器") {
                     menuAction("历史记录", icon: "clock.arrow.circlepath") { showingBrowserMenu = false; showingBrowsingHistory = true }
                     menuAction("书签", icon: "bookmark") { showingBrowserMenu = false; showingBookmarks = true }
@@ -290,16 +312,12 @@ struct ContentView: View {
                         Button("重置") { browserZoomLevel = 1; applyBrowserZoom() }.font(.caption)
                     }
                 }
-                Section("App 功能") {
-                }
                 Section("页面操作") {
                     menuAction("刷新网页", icon: "arrow.clockwise") { browserController.reload(); showingBrowserMenu = false }
                     menuAction("复制当前网址", icon: "doc.on.doc") {
                         if let url = currentPageURL { UIPasteboard.general.string = url.absoluteString }
                         showingBrowserMenu = false
                     }
-                    NavigationLink { downloadsTab } label: { Label("下载管理", systemImage: "arrow.down.circle") }
-                    NavigationLink { filesTab } label: { Label("文件管理", systemImage: "folder") }
                     NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
                 }
             }
@@ -708,6 +726,20 @@ struct ContentView: View {
                     Text("阻止网页通过 window.open 或新窗口链接打开页面。默认关闭。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                Section("主页") {
+                    Picker("主页内容", selection: $browserHomePage) {
+                        Text("下载器起始页").tag("start")
+                        Text("自定义网址").tag("custom")
+                    }
+                    if browserHomePage == "custom" {
+                        TextField("https://example.com", text: $browserCustomHomeURL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .keyboardType(.URL)
+                    }
+                    Text("点击浏览器底部的主页按钮时打开此页面。下载器起始页提供下载管理和文件入口。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("地址栏与搜索") {
                     Picker("默认搜索引擎", selection: $defaultSearchEngine) {
                         Text("必应").tag("bing")
@@ -963,6 +995,27 @@ struct ContentView: View {
     private func formattedFileDate(_ url: URL) -> String {
         let date = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
         return date.formatted(date: .numeric, time: .shortened)
+    }
+
+    private func openHomePage() {
+        if browserHomePage == "custom" {
+            let raw = browserCustomHomeURL.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !raw.isEmpty else {
+                browserAddress = ""
+                browserController.rebuildWebView()
+                return
+            }
+            let normalized = raw.contains("://") ? raw : "https://" + raw
+            guard let url = URL(string: normalized), ["http", "https"].contains(url.scheme?.lowercased() ?? ""), url.host != nil else {
+                errorMessage = "主页网址无效，请在设置中检查。"
+                return
+            }
+            browserAddress = url.absoluteString
+            browserController.load(url)
+        } else {
+            browserAddress = ""
+            browserController.rebuildWebView()
+        }
     }
 
     private func loadBrowserAddress() {
