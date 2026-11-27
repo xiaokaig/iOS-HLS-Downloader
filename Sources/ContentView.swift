@@ -136,8 +136,13 @@ struct ContentView: View {
                 NavigationStack {
                     List {
                         if candidates.isEmpty {
-                            ContentUnavailableView("暂未发现视频", systemImage: "dot.radiowaves.left.and.right",
-                                description: Text("播放网页中的视频后，检测到 HLS 地址会显示在这里。"))
+                            VStack(spacing: 10) {
+                                Image(systemName: "dot.radiowaves.left.and.right").font(.largeTitle).foregroundStyle(.secondary)
+                                Text("暂未发现视频").font(.headline)
+                                Text("播放网页中的视频后，检测到 HLS 地址会显示在这里。")
+                                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                            }
+                            .frame(maxWidth: .infinity).padding(.vertical, 28)
                         } else {
                             ForEach(candidates, id: \.absoluteString) { url in
                                 VStack(alignment: .leading, spacing: 8) {
