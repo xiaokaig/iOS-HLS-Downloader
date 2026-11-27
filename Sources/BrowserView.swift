@@ -479,6 +479,34 @@ struct BrowserView: UIViewRepresentable {
     })();
     """#
 
+    private func installCosmeticRules(in contentController: WKUserContentController) {
+        let entries: [[String: Any]] = customAdDomains.components(separatedBy: .newlines).compactMap { raw in
+            let line = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let marker = line.range(of: "##"), !line.contains("#@#") else { return nil }
+            let hosts = String(line[..<marker.lowerBound]).split(separator: ",").map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            let selector = String(line[marker.upperBound...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !hosts.isEmpty, !selector.isEmpty, selector.count <= 500 else { return nil }
+            return ["hosts": hosts, "selector": selector]
+        }
+        guard !entries.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: entries),
+              let json = String(data: data, encoding: .utf8) else { return }
+        let source = """
+        (() => {
+          const rules = \(json);
+          const host = location.hostname.toLowerCase();
+          const selectors = rules.filter(rule => rule.hosts.some(domain => host === domain || host.endsWith('.' + domain)))
+            .map(rule => rule.selector);
+          if (!selectors.length || document.getElementById('__app_ad_cosmetic_rules')) return;
+          const style = document.createElement('style');
+          style.id = '__app_ad_cosmetic_rules';
+          style.textContent = selectors.map(selector => selector + '{display:none!important;visibility:hidden!important}').join('\\n');
+          (document.head || document.documentElement).appendChild(style);
+        })();
+        """
+        contentController.addUserScript(WKUserScript(source: source, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+    }
+
     private func installContentRules(in contentController: WKUserContentController, coordinator: Coordinator) {
         guard isAdRedirectBlockingEnabled else {
             contentController.removeAllContentRuleLists()
@@ -491,23 +519,34 @@ struct BrowserView: UIViewRepresentable {
             "taboola.com", "outbrain.com", "adnxs.com", "exoclick.com",
             "trafficjunky.net", "adsterra.com"
         ]
-        let custom = customAdDomains.components(separatedBy: .newlines)
+        let customLines = customAdDomains.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
-            .filter { domain in
-                guard !domain.isEmpty, domain.utf8.count <= 253 else { return false }
-                let labels = domain.split(separator: ".", omittingEmptySubsequences: false)
-                guard labels.count >= 2 else { return false }
-                return labels.allSatisfy { label in
-                    label.utf8.count <= 63 &&
-                    label.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"#, options: .regularExpression) != nil
-                }
+        let custom = customLines.compactMap { line -> String? in
+            let candidate: String
+            if line.hasPrefix("||") {
+                candidate = String(line.dropFirst(2)).prefix { $0 != "^" && $0 != "/" && $0 != "$" && $0 != "*" }.description
+            } else if line.hasPrefix("@@") || line.contains("##") || line.contains("#@#") {
+                return nil
+            } else {
+                candidate = line
             }
-        let domains = Array(Set(builtIn + custom)).sorted().prefix(1200)
-        let signature = domains.joined(separator: "|")
+            guard !candidate.isEmpty, candidate.utf8.count <= 253 else { return nil }
+            let labels = candidate.split(separator: ".", omittingEmptySubsequences: false)
+            guard labels.count >= 2 else { return nil }
+            guard labels.allSatisfy({ label in
+                label.utf8.count <= 63 &&
+                label.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$"#, options: .regularExpression) != nil
+            }) else { return nil }
+            return candidate
+        }
+        let domainList = Array(Set(builtIn + custom)).sorted()
+        let signature = domainList.joined(separator: "|") + "|" + customLines.filter { $0.contains("##") }.joined(separator: "|")
         guard coordinator.adRulesSignature != signature else { return }
         coordinator.adRulesSignature = signature
-        let domainList = Array(domains)
-        let store = WKContentRuleListStore.default()
+        guard let store = WKContentRuleListStore.default() else {
+            AppDiagnostics.shared.log("ERROR", "WebKit 内容规则存储不可用")
+            return
+        }
 
         // WebKit rejects an entire content-rule list when even one expression is
         // unsupported. Compile as a whole first, then bisect failed batches so a
@@ -563,17 +602,27 @@ struct BrowserView: UIViewRepresentable {
             }
         }
 
-        compile(domainList) { lists in
+        let batches = stride(from: 0, to: domainList.count, by: 250).map {
+            Array(domainList[$0..<min($0 + 250, domainList.count)])
+        }
+        func compileBatch(_ index: Int, accumulated: [WKContentRuleList]) {
             guard coordinator.adRulesSignature == signature else { return }
-            contentController.removeAllContentRuleLists()
-            lists.forEach { contentController.add($0) }
-            if !lists.isEmpty {
-                coordinator.webView?.reload()
-                AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domainList.count) 个域名，拆分规则组 \(lists.count) 组")
-            } else {
-                AppDiagnostics.shared.log("ERROR", "广告规则未能编译，未加载任何规则")
+            guard index < batches.count else {
+                contentController.removeAllContentRuleLists()
+                accumulated.forEach { contentController.add($0) }
+                if !accumulated.isEmpty {
+                    coordinator.webView?.reload()
+                    AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domainList.count) 个域名，规则组 \(accumulated.count) 组")
+                } else {
+                    AppDiagnostics.shared.log("ERROR", "广告规则未能编译，未加载任何规则")
+                }
+                return
+            }
+            compile(batches[index]) { lists in
+                compileBatch(index + 1, accumulated: accumulated + lists)
             }
         }
+        compileBatch(0, accumulated: [])
     }
 
     func makeCoordinator() -> Coordinator {
@@ -630,6 +679,7 @@ struct BrowserView: UIViewRepresentable {
             if isVideoSniffingEnabled {
                 contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
+            installCosmeticRules(in: contentController)
             installContentRules(in: contentController, coordinator: context.coordinator)
             context.coordinator.webView = existing
             if settingsChanged, existing.url != nil { existing.reload() }
@@ -644,6 +694,7 @@ struct BrowserView: UIViewRepresentable {
         if isVideoSniffingEnabled {
             contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         }
+        installCosmeticRules(in: contentController)
         contentController.add(WeakScriptMessageHandler(context.coordinator), name: "hls")
         contentController.add(WeakScriptMessageHandler(context.coordinator), name: "video")
         installContentRules(in: contentController, coordinator: context.coordinator)
@@ -651,6 +702,10 @@ struct BrowserView: UIViewRepresentable {
         let configuration = WKWebViewConfiguration()
         configuration.userContentController = contentController
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = true
+        // Keep media inside the page: website controls and player remain in charge.
+        configuration.allowsInlineMediaPlayback = true
+        configuration.allowsAirPlayForMediaPlayback = true
+        configuration.mediaTypesRequiringUserActionForPlayback = []
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
@@ -716,6 +771,7 @@ struct BrowserView: UIViewRepresentable {
             if isVideoSniffingEnabled {
                 contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
             }
+            installCosmeticRules(in: contentController)
             AppDiagnostics.shared.log("SNIFF", "嗅探开关切换 HLS=\(isSniffingEnabled) 普通视频=\(isVideoSniffingEnabled)")
             if webView.url != nil { webView.reload() }
         }
