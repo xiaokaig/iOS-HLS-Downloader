@@ -88,6 +88,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
 final class DownloadQueueManager: ObservableObject {
     @Published private(set) var items: [DownloadQueueItem] = []
     private var activeIDs = Set<UUID>()
+    private var activeURLs = Set<String>()
     private let maximumConcurrent = 3
     private var backgroundTaskID: UIBackgroundTaskIdentifier = .invalid
     private var backgroundExpired = false
@@ -137,6 +138,7 @@ final class DownloadQueueManager: ObservableObject {
         if let direct = item.directManager {
             direct.pause()
             activeIDs.remove(item.id)
+            activeURLs.remove(item.sourceURL.absoluteString)
             finishBackgroundTaskIfIdle()
             pump()
         } else {
@@ -159,6 +161,7 @@ final class DownloadQueueManager: ObservableObject {
         item.directManager?.cancel()
         if item.directManager != nil || !wasDownloading {
             activeIDs.remove(item.id)
+            activeURLs.remove(item.sourceURL.absoluteString)
         }
         item.status = "已取消"
         finishBackgroundTaskIfIdle()
@@ -188,7 +191,7 @@ final class DownloadQueueManager: ObservableObject {
     private func pump() {
         guard !backgroundExpired else { return }
         while activeIDs.count < maximumConcurrent,
-              let next = items.first(where: { $0.state == .queued && !activeIDs.contains($0.id) }) {
+              let next = items.first(where: { $0.state == .queued && !activeIDs.contains($0.id) && !activeURLs.contains($0.sourceURL.absoluteString) }) {
             start(next)
         }
         objectWillChange.send()
@@ -197,6 +200,7 @@ final class DownloadQueueManager: ObservableObject {
     private func start(_ item: DownloadQueueItem) {
         beginBackgroundTaskIfNeeded()
         guard activeIDs.insert(item.id).inserted else { return }
+        activeURLs.insert(item.sourceURL.absoluteString)
         item.state = .downloading
         item.errorMessage = nil
 
@@ -209,6 +213,7 @@ final class DownloadQueueManager: ObservableObject {
                 } catch {
                     if error is CancellationError || Task.isCancelled {
                         self?.activeIDs.remove(item.id)
+                        self?.activeURLs.remove(item.sourceURL.absoluteString)
                         if item.state == .paused && self?.backgroundExpired != true { item.status = "已暂停" }
                         self?.finishBackgroundTaskIfIdle()
                         self?.pump()
@@ -237,6 +242,7 @@ final class DownloadQueueManager: ObservableObject {
 
     private func finish(_ item: DownloadQueueItem, output: URL) {
         activeIDs.remove(item.id)
+        activeURLs.remove(item.sourceURL.absoluteString)
         item.outputURL = output
         item.progress = 1
         item.state = .completed
@@ -249,6 +255,7 @@ final class DownloadQueueManager: ObservableObject {
 
     private func finishWithError(_ item: DownloadQueueItem, error: Error) {
         activeIDs.remove(item.id)
+        activeURLs.remove(item.sourceURL.absoluteString)
         if item.state != .paused && item.state != .cancelled {
             item.state = .failed
             item.errorMessage = error.localizedDescription
@@ -279,6 +286,7 @@ final class DownloadQueueManager: ObservableObject {
             if let direct = item.directManager {
                 direct.pause()
                 activeIDs.remove(item.id)
+                activeURLs.remove(item.sourceURL.absoluteString)
             } else {
                 item.runner?.cancel()
             }
