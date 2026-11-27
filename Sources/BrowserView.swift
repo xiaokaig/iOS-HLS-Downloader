@@ -459,6 +459,24 @@ struct BrowserView: UIViewRepresentable {
         if let existing = controller.webView {
             existing.navigationDelegate = context.coordinator
             existing.uiDelegate = context.coordinator
+            existing.customUserAgent = isDesktopMode
+                ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+                : nil
+            context.coordinator.isDesktopMode = isDesktopMode
+            context.coordinator.isSniffingEnabled = isSniffingEnabled
+            context.coordinator.isVideoSniffingEnabled = isVideoSniffingEnabled
+            context.coordinator.isAdRedirectBlockingEnabled = isAdRedirectBlockingEnabled
+            context.coordinator.isPopupBlockingEnabled = isPopupBlockingEnabled
+            context.coordinator.customAdDomains = customAdDomains
+            let contentController = existing.configuration.userContentController
+            contentController.removeAllUserScripts()
+            if isSniffingEnabled {
+                contentController.addUserScript(WKUserScript(source: Self.sniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
+            if isVideoSniffingEnabled {
+                contentController.addUserScript(WKUserScript(source: Self.videoSniffingScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+            }
+            installContentRules(in: contentController, coordinator: context.coordinator)
             context.coordinator.webView = existing
             return existing
         }
@@ -482,6 +500,7 @@ struct BrowserView: UIViewRepresentable {
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = context.coordinator
         if isDesktopMode { webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15" }
+        context.coordinator.isDesktopMode = isDesktopMode
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
