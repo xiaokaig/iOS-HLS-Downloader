@@ -60,8 +60,14 @@ struct ContentView: View {
             set: { if !$0 { playingURL = nil } }
         )) {
             if let url = playingURL {
-                VideoPlayer(player: AVPlayer(url: url))
-                    .ignoresSafeArea()
+                if url.pathExtension.lowercased() == "ts" {
+                    VLCPlayerView(url: url)
+                        .ignoresSafeArea()
+                        .background(.black)
+                } else {
+                    VideoPlayer(player: AVPlayer(url: url))
+                        .ignoresSafeArea()
+                }
             }
         }
         .alert("操作未完成", isPresented: Binding(
@@ -94,9 +100,9 @@ struct ContentView: View {
                     Button(action: loadBrowserAddress) {
                         Image(systemName: "arrow.right.circle.fill").font(.title2)
                     }
+                    .disabled(browserAddress.trimmingCharacters(in: .whitespaces).isEmpty)
                     Button { browserController.reload() } label: { Image(systemName: "arrow.clockwise") }
                     Button { browserController.goHome() } label: { Image(systemName: "house") }
-                    .disabled(browserAddress.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
                 .padding(12)
                 .background(.thinMaterial)
@@ -205,7 +211,7 @@ struct ContentView: View {
                             else { Label("解析地址", systemImage: "text.magnifyingglass").frame(maxWidth: .infinity) }
                         }
                         .buttonStyle(.borderedProminent)
-                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || downloader.isDownloading)
+                        .disabled(directURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isInspecting || downloader.isDownloading)
                     }
                     .padding()
                     .background(.background)
@@ -418,12 +424,6 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("关闭") { showingVariants = false } } }
         }
-    }
-
-    private func loadBrowserAddress() {
-        let raw = browserAddress.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !raw.isEmpty else { return }
-        browserAddress = raw.contains("://") ? raw : "https://" + raw
     }
 
     private func addCandidate(_ url: URL, cookies: [HTTPCookie]) {

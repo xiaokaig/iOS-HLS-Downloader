@@ -284,10 +284,15 @@ final class HLSDownloadManager: ObservableObject {
     private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
         let destination = sourceURL.deletingPathExtension().appendingPathExtension("mp4")
         try? FileManager.default.removeItem(at: destination)
-        let remuxer = VLCTSRemuxer()
-        let result = try await remuxer.remux(source: sourceURL, destination: destination)
-        try? FileManager.default.removeItem(at: sourceURL)
-        return result
+        do {
+            let remuxer = VLCTSRemuxer()
+            let result = try await remuxer.remux(source: sourceURL, destination: destination)
+            try? FileManager.default.removeItem(at: sourceURL)
+            return result
+        } catch {
+            try? FileManager.default.removeItem(at: destination)
+            throw error
+        }
     }
 
     private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> String {
