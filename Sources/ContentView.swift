@@ -124,7 +124,7 @@ struct ContentView: View {
                 HStack(spacing: 0) {
                     browserTool("chevron.left", disabled: !browserController.canGoBack) { browserController.goBack() }
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
-                    browserTool("house") { browserAddress = "https://"; browserController.webView?.loadHTMLString("", baseURL: nil) }
+                    browserTool("house") { browserAddress = "https://www.google.com/"; browserController.goHome() }
                     Spacer(minLength: 8)
                     Button { showingBrowserCandidates = true } label: {
                         HStack(spacing: 5) {
@@ -136,7 +136,7 @@ struct ContentView: View {
                         .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
                     }
                     browserTool("arrow.clockwise") { browserController.reload() }
-                    browserTool("square.on.square") { browserController.goHome() }
+                    browserTool("xmark", disabled: !browserController.isLoading) { browserController.stopLoading() }
                 }
                 .padding(.horizontal, 14).padding(.top, 9).padding(.bottom, 5).background(.ultraThinMaterial)
             }
@@ -416,9 +416,9 @@ struct ContentView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .lineLimit(300)
                     Button {
-                        UIPasteboard.general.string = AppDiagnostics.shared.copyAll()
+                        UIPasteboard.general.string = AppDiagnostics.shared.copyRecent(maxLines: 200)
                     } label: {
-                        Label("复制完整日志", systemImage: "doc.on.doc")
+                        Label("复制最近日志（最多200行）", systemImage: "doc.on.doc")
                     }
                     ShareLink(item: AppDiagnostics.shared.exportURL()) {
                         Label("导出日志文件", systemImage: "square.and.arrow.up")
@@ -428,7 +428,7 @@ struct ContentView: View {
                     } label: {
                         Label("刷新日志", systemImage: "arrow.clockwise")
                     }
-                    Text("从应用启动开始记录，最多约 2MB；敏感认证字段会脱敏。")
+                    Text("从应用启动开始记录，最多约 2MB；相同事件自动合并；复制仅包含最近 200 行。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
