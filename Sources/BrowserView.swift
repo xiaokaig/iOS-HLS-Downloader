@@ -448,12 +448,12 @@ struct BrowserView: UIViewRepresentable {
             return domains.contains { normalizedHost == $0 || normalizedHost.hasSuffix("." + $0) }
         }
 
-        private func shouldBlock(_ url: URL, isNewWindow: Bool) -> Bool {
+        private func shouldBlock(_ url: URL, isNewWindow: Bool, isMainFrame: Bool) -> Bool {
             if isNewWindow && isPopupBlockingEnabled {
                 AppDiagnostics.shared.log("ADBLOCK", "已拦截弹窗 url=\(AppDiagnostics.safeURL(url))")
                 return true
             }
-            if isAdRedirectBlockingEnabled, let host = url.host, isBlockedAdDomain(host) {
+            if isMainFrame, isAdRedirectBlockingEnabled, let host = url.host, isBlockedAdDomain(host) {
                 AppDiagnostics.shared.log("ADBLOCK", "已拦截广告域名跳转 host=\(host)")
                 return true
             }
@@ -483,7 +483,8 @@ struct BrowserView: UIViewRepresentable {
                 return
             }
             let isNewWindow = navigationAction.targetFrame == nil
-            if shouldBlock(url, isNewWindow: isNewWindow) {
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            if shouldBlock(url, isNewWindow: isNewWindow, isMainFrame: isMainFrame) {
                 decisionHandler(.cancel)
                 return
             }
@@ -503,7 +504,7 @@ struct BrowserView: UIViewRepresentable {
         ) -> WKWebView? {
             guard navigationAction.targetFrame == nil else { return nil }
             guard let url = navigationAction.request.url else { return nil }
-            if shouldBlock(url, isNewWindow: true) { return nil }
+            if shouldBlock(url, isNewWindow: true, isMainFrame: true) { return nil }
             AppDiagnostics.shared.log("NAV", "window.open 在当前标签承载 url=\(AppDiagnostics.safeURL(url))")
             return webView
         }
