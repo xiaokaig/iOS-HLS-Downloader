@@ -194,6 +194,7 @@ final class DownloadQueueManager: ObservableObject {
               let next = items.first(where: { $0.state == .queued }) {
             start(next)
         }
+        objectWillChange.send()
     }
 
     private func start(_ item: DownloadQueueItem) {
@@ -283,6 +284,7 @@ final class DownloadQueueManager: ObservableObject {
         }
         activeIDs.removeAll()
         finishBackgroundTaskIfIdle()
+        objectWillChange.send()
     }
 
     private func notifyCompletion(_ title: String) {
