@@ -115,6 +115,8 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
     @Published private(set) var status = "等待下载"
     @Published private(set) var outputURL: URL?
     @Published private(set) var isDownloading = false
+    @Published private(set) var isPaused = false
+    var onCompletion: ((Result<URL, Error>) -> Void)?
 
     private var session: URLSession?
     private var task: URLSessionDownloadTask?
@@ -141,6 +143,7 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         outputURL = nil
         status = "正在下载普通视频…"
         isDownloading = true
+        isPaused = false
         let newSession = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
         session = newSession
         let newTask = newSession.downloadTask(with: request)
@@ -199,6 +202,8 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
                 self.progress = 1
                 self.status = "普通视频下载完成"
                 self.isDownloading = false
+                self.isPaused = false
+                self.onCompletion?(.success(destination))
                 self.task = nil
                 self.session?.finishTasksAndInvalidate()
                 self.session = nil
@@ -212,10 +217,38 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         if let error { finishWithError(error.localizedDescription) }
     }
 
+    func pause() {
+        guard isDownloading, !isPaused else { return }
+        task?.suspend()
+        isPaused = true
+        status = "已暂停"
+    }
+
+    func resume() {
+        guard isDownloading, isPaused else { return }
+        isPaused = false
+        status = "正在继续下载…"
+        task?.resume()
+    }
+
+    func cancel() {
+        guard isDownloading else { return }
+        onCompletion = nil
+        task?.cancel()
+        task = nil
+        session?.invalidateAndCancel()
+        session = nil
+        isDownloading = false
+        isPaused = false
+        status = "已取消"
+    }
+
     private func finishWithError(_ message: String) {
         DispatchQueue.main.async {
             self.status = "下载失败：\(message)"
             self.isDownloading = false
+            self.isPaused = false
+            self.onCompletion?(.failure(NSError(domain: "DirectVideoDownload", code: -1, userInfo: [NSLocalizedDescriptionKey: message])))
             self.task = nil
             self.session?.invalidateAndCancel()
             self.session = nil
