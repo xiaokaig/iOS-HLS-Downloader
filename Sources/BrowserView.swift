@@ -294,6 +294,7 @@ struct BrowserView: UIViewRepresentable {
       const originalOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url) {
         this.__hlsURL = url;
+        notify(url);
         return originalOpen.apply(this, arguments);
       };
       const originalSend = XMLHttpRequest.prototype.send;
@@ -310,6 +311,17 @@ struct BrowserView: UIViewRepresentable {
         });
         return originalSend.apply(this, arguments);
       };
+      try {
+        const mediaSrc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+        if (mediaSrc && mediaSrc.set && mediaSrc.get) {
+          Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+            configurable: true,
+            enumerable: mediaSrc.enumerable,
+            get: mediaSrc.get,
+            set(value) { notify(value); return mediaSrc.set.call(this, value); }
+          });
+        }
+      } catch (_) {}
       const scan = () => {
         performance.getEntriesByType('resource').forEach(entry => {
           if (/\\.m3u8(?:[/?#]|$)/i.test(entry.name)) notify(entry.name);
@@ -360,6 +372,7 @@ struct BrowserView: UIViewRepresentable {
       const originalOpen = XMLHttpRequest.prototype.open;
       XMLHttpRequest.prototype.open = function(method, url) {
         this.__videoURL = url;
+        notify(url);
         return originalOpen.apply(this, arguments);
       };
       const originalSend = XMLHttpRequest.prototype.send;
@@ -370,6 +383,17 @@ struct BrowserView: UIViewRepresentable {
         });
         return originalSend.apply(this, arguments);
       };
+      try {
+        const mediaSrc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+        if (mediaSrc && mediaSrc.set && mediaSrc.get) {
+          Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+            configurable: true,
+            enumerable: mediaSrc.enumerable,
+            get: mediaSrc.get,
+            set(value) { notify(value); return mediaSrc.set.call(this, value); }
+          });
+        }
+      } catch (_) {}
       const scan = () => {
         performance.getEntriesByType('resource').forEach(entry => notify(entry.name));
         document.querySelectorAll('video,source').forEach(node => {
@@ -430,7 +454,8 @@ struct BrowserView: UIViewRepresentable {
                     coordinator.webView?.reload()
                     AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domains.count) 个域名")
                 } else if let error {
-                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败：\(error.localizedDescription)")
+                    let detail = error as NSError
+                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败 domain=\(detail.domain) code=\(detail.code) info=\(detail.userInfo) rules=\(domains.count) first=\(domains.prefix(5).joined(separator: ","))")
                 }
             }
         }
@@ -647,6 +672,15 @@ struct BrowserView: UIViewRepresentable {
             return domains.contains { normalizedHost == $0 || normalizedHost.hasSuffix("." + $0) }
         }
 
+        private func isHLSPlaylistURL(_ url: URL) -> Bool {
+            url.pathExtension.lowercased() == "m3u8"
+        }
+
+        private func isHLSPlaylistMIME(_ mime: String) -> Bool {
+            let value = mime.lowercased().split(separator: ";", maxSplits: 1).first.map(String.init) ?? mime.lowercased()
+            return ["application/vnd.apple.mpegurl", "application/x-mpegurl", "audio/mpegurl", "audio/x-mpegurl"].contains(value)
+        }
+
         private func shouldBlock(_ url: URL, isNewWindow: Bool, isMainFrame: Bool) -> Bool {
             if isNewWindow && isPopupBlockingEnabled {
                 AppDiagnostics.shared.log("ADBLOCK", "已拦截弹窗 url=\(AppDiagnostics.safeURL(url))")
@@ -660,6 +694,7 @@ struct BrowserView: UIViewRepresentable {
         }
 
         private func capture(_ url: URL, isDirectVideo: Bool) {
+            AppDiagnostics.shared.log("SNIFF", "捕获\(isDirectVideo ? "普通视频" : "HLS")候选 url=\(AppDiagnostics.safeURL(url))")
             guard let webView else {
                 onCapture(url, [], isDirectVideo)
                 return
@@ -692,6 +727,16 @@ struct BrowserView: UIViewRepresentable {
             }
             let isNewWindow = navigationAction.targetFrame == nil
             let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            if isSniffingEnabled, isMainFrame, isHLSPlaylistURL(url) {
+                AppDiagnostics.shared.log("SNIFF", "拦截 HLS 主文档导航并转入嗅探列表 url=\(AppDiagnostics.safeURL(url))")
+                capture(url, isDirectVideo: false)
+                decisionHandler(.cancel)
+                return
+            }
+            if isVideoSniffingEnabled, isMainFrame,
+               ["mp4", "m4v", "mov", "webm", "mkv", "avi"].contains(url.pathExtension.lowercased()) {
+                capture(url, isDirectVideo: true)
+            }
             if shouldBlock(url, isNewWindow: isNewWindow, isMainFrame: isMainFrame) {
                 decisionHandler(.cancel)
                 return
@@ -746,6 +791,12 @@ struct BrowserView: UIViewRepresentable {
                 let mime = navigationResponse.response.mimeType ?? "未知"
                 let responseURL = navigationResponse.response.url
                 AppDiagnostics.shared.log("RESPONSE", "主文档响应 mime=\(mime) url=\(AppDiagnostics.safeURL(responseURL))")
+                if isSniffingEnabled, isHLSPlaylistMIME(mime), let responseURL {
+                    AppDiagnostics.shared.log("SNIFF", "主文档响应识别为 HLS mime=\(mime)")
+                    capture(responseURL, isDirectVideo: false)
+                    decisionHandler(.cancel)
+                    return
+                }
                 if isVideoSniffingEnabled, ["video/mp4", "video/quicktime", "video/webm", "video/x-m4v", "video/x-msvideo", "video/x-matroska"].contains(mime.lowercased()), let responseURL {
                     capture(responseURL, isDirectVideo: true)
                 }
