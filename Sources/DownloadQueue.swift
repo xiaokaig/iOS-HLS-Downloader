@@ -41,6 +41,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
     @Published var status = "等待开始"
     @Published var outputURL: URL?
     @Published var errorMessage: String?
+    @Published var conversionWarning: String?
 
     var runner: Task<Void, Never>?
     private var cancellables = Set<AnyCancellable>()
@@ -59,6 +60,9 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
             manager.$status.receive(on: DispatchQueue.main).sink { [weak self] in
                 guard self?.state == .downloading else { return }
                 self?.status = $0
+            }.store(in: &cancellables)
+            manager.$conversionWarning.receive(on: DispatchQueue.main).sink { [weak self] in
+                self?.conversionWarning = $0
             }.store(in: &cancellables)
         case .direct:
             let manager = DirectVideoDownloadManager()
@@ -310,6 +314,10 @@ struct DownloadQueueRow: View {
                 ProgressView(value: item.progress)
                 Text(item.progress, format: .percent.precision(.fractionLength(0)))
                     .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            if let warning = item.conversionWarning {
+                Label(warning, systemImage: "exclamationmark.triangle.fill")
+                    .font(.caption2).foregroundStyle(.orange)
             }
             HStack {
                 if item.state == .downloading {
