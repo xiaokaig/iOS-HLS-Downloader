@@ -260,11 +260,16 @@ struct BrowserView: UIViewRepresentable {
       };
       const originalFetch = window.fetch;
       window.fetch = function(input, init) {
+        const requestURL = input && input.url ? input.url : input;
+        notify(requestURL);
         const promise = originalFetch.apply(this, arguments);
         promise.then(response => {
           const type = (response.headers.get('content-type') || '').toLowerCase();
           if (/mpegurl|vnd\\.apple\\.mpegurl/.test(type)) notify(response.url);
           else if (response.url && /\\.m3u8(?:[/?#]|$)/i.test(response.url)) notify(response.url);
+          else response.clone().text().then(body => {
+            if (body.trimStart().replace(/^\\uFEFF/, '').startsWith('#EXTM3U')) notify(response.url);
+          }).catch(() => {});
         }).catch(() => {});
         return promise;
       };
