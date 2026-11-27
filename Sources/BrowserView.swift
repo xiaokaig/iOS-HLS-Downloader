@@ -409,13 +409,13 @@ struct BrowserView: UIViewRepresentable {
         let rules: [[String: Any]] = domains.map { domain in
             let escaped = NSRegularExpression.escapedPattern(for: domain)
             return [
-                "trigger": ["url-filter": "^https?://([^/]+\\.)*\\(escaped)([/:?#]|$)"],
+                "trigger": ["url-filter": "^https?://([^/]+\\.)*\(escaped)([/:?#]|$)"],
                 "action": ["type": "block"]
             ]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: rules),
               let encoded = String(data: data, encoding: .utf8) else { return }
-        let identifier = "BrowserAdRules-\\(String(signature.hashValue.magnitude))"
+        let identifier = "BrowserAdRules-\(String(signature.hashValue.magnitude))"
         WKContentRuleListStore.default().compileContentRuleList(
             forIdentifier: identifier,
             encodedContentRuleList: encoded
@@ -425,9 +425,9 @@ struct BrowserView: UIViewRepresentable {
                 contentController.removeAllContentRuleLists()
                 if let list {
                     contentController.add(list)
-                    AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\\(domains.count) 个域名")
+                    AppDiagnostics.shared.log("ADBLOCK", "网页资源规则已加载：\(domains.count) 个域名")
                 } else if let error {
-                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败：\\(error.localizedDescription)")
+                    AppDiagnostics.shared.log("ERROR", "广告规则编译失败：\(error.localizedDescription)")
                 }
             }
         }
