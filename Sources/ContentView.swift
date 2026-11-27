@@ -158,8 +158,8 @@ struct ContentView: View {
                     browserTool("chevron.right", disabled: !browserController.canGoForward) { browserController.goForward() }
                     browserTool("house") { browserAddress = "https://www.google.com/"; browserController.goHome() }
                     Spacer(minLength: 8)
-                    browserTool("clock.arrow.circlepath") { showingBrowsingHistory = true }
-                    browserTool("bookmarks") { showingBookmarks = true }
+                    browserLibraryTool("历史", symbol: "clock.arrow.circlepath") { showingBrowsingHistory = true }
+                    browserLibraryTool("书签", symbol: "bookmark") { showingBookmarks = true }
                     Button { showingBrowserCandidates = true } label: {
                         HStack(spacing: 5) {
                             Image(systemName: "dot.radiowaves.left.and.right")
@@ -346,6 +346,19 @@ struct ContentView: View {
             Image(systemName: symbol).font(.system(size: 17, weight: .medium)).frame(width: 42, height: 38)
         }
         .foregroundStyle(disabled ? .tertiary : .primary).disabled(disabled)
+    }
+
+    private func browserLibraryTool(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.caption.weight(.medium))
+                .labelStyle(.titleAndIcon)
+                .lineLimit(1)
+                .padding(.horizontal, 9)
+                .frame(height: 38)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: Capsule())
+        }
+        .foregroundStyle(.primary)
     }
 
     private func browserShortcut(_ title: String, icon: String, url: String) -> some View {
