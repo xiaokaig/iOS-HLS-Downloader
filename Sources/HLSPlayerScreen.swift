@@ -20,7 +20,7 @@ struct HLSPlayerScreen: View {
         ZStack {
             Color.black.ignoresSafeArea()
             Group {
-                if url.pathExtension.lowercased() == "ts" {
+                if ["ts", "mkv", "avi", "webm"].contains(url.pathExtension.lowercased()) {
                     VLCPlayerView(url: url)
                 } else {
                     VideoPlayer(player: AVPlayer(url: url))
