@@ -430,7 +430,6 @@ final class HLSDownloadManager: ObservableObject {
 
         for segmentURL in segments {
             let asset = AVURLAsset(url: segmentURL)
-            let duration = try await asset.load(.duration)
             let sourceVideoTracks = try await asset.loadTracks(withMediaType: .video)
             guard let sourceVideoTrack = sourceVideoTracks.first else {
                 throw NSError(domain: "HLSRemux", code: 10, userInfo: [NSLocalizedDescriptionKey: "分段 MP4 缺少视频轨道"])
@@ -445,7 +444,7 @@ final class HLSDownloadManager: ObservableObject {
                     try audioCompositionTrack.insertTimeRange(audioRange, of: sourceAudioTrack, at: cursor)
                 }
             }
-            cursor = CMTimeAdd(cursor, duration)
+            cursor = CMTimeAdd(cursor, videoRange.duration)
         }
 
         try? FileManager.default.removeItem(at: destination)
