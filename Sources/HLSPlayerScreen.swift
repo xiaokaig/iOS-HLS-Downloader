@@ -272,6 +272,11 @@ struct HLSPlayerScreen: View {
             player?.pause()
             player?.replaceCurrentItem(with: nil)
             player = nil
+            if let filteredPlaylistURL {
+                try? FileManager.default.removeItem(at: filteredPlaylistURL)
+                self.filteredPlaylistURL = nil
+                filteredPlaylistSourceURL = nil
+            }
         }
     }
 
