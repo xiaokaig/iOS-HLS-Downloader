@@ -63,7 +63,13 @@ struct TVBoxPlaybackHistoryView: View {
     var body: some View {
         List {
             if history.entries.isEmpty {
-                ContentUnavailableView("暂无播放记录", systemImage: "play.rectangle", description: Text("从 TVBox 影视源播放后，记录会自动保存在这里。"))
+                VStack(spacing: 10) {
+                    Image(systemName: "play.rectangle").font(.largeTitle).foregroundStyle(.tertiary)
+                    Text("暂无播放记录").font(.headline)
+                    Text("从 TVBox 影视源播放后，记录会自动保存在这里。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity).padding(.vertical, 36)
             } else {
                 ForEach(history.entries) { entry in
                     Button {

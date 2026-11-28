@@ -44,6 +44,7 @@ struct HLSPlayerScreen: View {
         self.onDownload = onDownload
         self.onClose = onClose
         _activePlayback = State(initialValue: tvboxPlayback)
+        _resumePositionState = State(initialValue: resumePosition)
     }
 
     private var currentURL: URL { activePlayback?.url ?? url }
@@ -68,6 +69,7 @@ struct HLSPlayerScreen: View {
     @State private var player: AVPlayer?
     @State private var periodicTimeObserver: Any?
     @State private var resumeAppliedURL = ""
+    @State private var resumePositionState = 0.0
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
     @State private var controlsVisible = true
@@ -201,6 +203,8 @@ struct HLSPlayerScreen: View {
             vlcStatusMessage = "正在连接视频源…"
             downloadFeedback = nil
             if usesVLC {
+                if let periodicTimeObserver, let player { player.removeTimeObserver(periodicTimeObserver) }
+                periodicTimeObserver = nil
                 player?.pause()
                 player?.replaceCurrentItem(with: nil)
                 player = nil
@@ -422,6 +426,7 @@ struct HLSPlayerScreen: View {
               let playback = activePlayback else { return }
         savePlaybackProgress()
         resumeAppliedURL = ""
+        resumePositionState = 0
         activePlayback = TVBoxPlayback(
             videoTitle: playback.videoTitle,
             sourceName: source.name,
@@ -484,10 +489,10 @@ struct HLSPlayerScreen: View {
                 if observed.status == .failed {
                     playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
                 } else if observed.status == .readyToPlay,
-                          resumePosition > 0,
+                          resumePositionState > 0,
                           resumeAppliedURL != currentURL.absoluteString {
                     resumeAppliedURL = currentURL.absoluteString
-                    player?.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                    player?.seek(to: CMTime(seconds: resumePositionState, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 }
             }
         }

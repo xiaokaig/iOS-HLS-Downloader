@@ -117,7 +117,7 @@ struct TVBoxSourceView: View {
                 }
             }
         }
-         .navigationTitle("TVBox 影视源")
+        .navigationTitle("TVBox 影视源")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
             if parsedSource == nil, !parsedSourceCacheJSON.isEmpty,
@@ -191,8 +191,6 @@ struct TVBoxSourceView: View {
             saveHistory(url: rawAddress, title: source.title)
             statusMessage = "读取成功：\(source.siteCount) 个站点，已加入源历史。"
         } catch {
-            parsedSource = nil
-            sourceHost = ""
             statusMessage = "读取失败：\(error.localizedDescription)"
         }
     }
