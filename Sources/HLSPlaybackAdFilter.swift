@@ -51,7 +51,7 @@ enum HLSPlaybackAdFilter {
         var pendingSegmentTags: [String] = []
         for line in lines {
             if line.hasPrefix("#EXTINF:") {
-                pendingSegmentTags = [line]
+                pendingSegmentTags.append(line)
             } else if !line.hasPrefix("#") {
                 guard let absoluteURL = URL(string: line, relativeTo: playlistURL)?.absoluteURL else {
                     throw HLSParserError.invalidURL
