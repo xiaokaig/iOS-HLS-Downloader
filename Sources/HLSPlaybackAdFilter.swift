@@ -50,6 +50,7 @@ enum HLSPlaybackAdFilter {
         var output: [String] = []
         let firstRetainedSequence = parsed.segments.first(where: { !$0.isAd })?.sequence ?? parsed.mediaSequence
         var pendingSegmentTags: [String] = []
+        var carryDiscontinuity = false
         for line in lines {
             if line.hasPrefix("#EXTINF:") {
                 pendingSegmentTags.append(line)
@@ -58,8 +59,14 @@ enum HLSPlaybackAdFilter {
                     throw HLSParserError.invalidURL
                 }
                 if !adURLs.contains(absoluteURL.absoluteString) {
+                    if carryDiscontinuity && !pendingSegmentTags.contains("#EXT-X-DISCONTINUITY") {
+                        output.append("#EXT-X-DISCONTINUITY")
+                    }
                     output.append(contentsOf: pendingSegmentTags)
                     output.append(absoluteURL.absoluteString)
+                    carryDiscontinuity = false
+                } else if pendingSegmentTags.contains("#EXT-X-DISCONTINUITY") {
+                    carryDiscontinuity = true
                 }
                 pendingSegmentTags.removeAll(keepingCapacity: true)
             } else if isSegmentScopedTag(line) {
