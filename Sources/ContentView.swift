@@ -84,6 +84,7 @@ struct ContentView: View {
     @State private var playingTitle: String?
     @State private var playingSubtitle: String?
     @State private var playingPreloadedAsset: AVURLAsset?
+    @State private var playingDownloadAction: (() -> Void)?
 
     var body: some View {
         browserTab
@@ -127,15 +128,17 @@ struct ContentView: View {
                 playingTitle = nil
                 playingSubtitle = nil
                 playingPreloadedAsset = nil
+                playingDownloadAction = nil
             } }
         )) {
             if let url = playingURL {
-                HLSPlayerScreen(url: url, headers: playingHeaders, title: playingTitle, subtitle: playingSubtitle, preloadedAsset: playingPreloadedAsset, onClose: {
+                HLSPlayerScreen(url: url, headers: playingHeaders, title: playingTitle, subtitle: playingSubtitle, preloadedAsset: playingPreloadedAsset, onDownload: playingDownloadAction, onClose: {
                     playingURL = nil
                     playingHeaders = [:]
                     playingTitle = nil
                     playingSubtitle = nil
                     playingPreloadedAsset = nil
+                    playingDownloadAction = nil
                 })
                     .background(.black)
             }
@@ -340,7 +343,21 @@ struct ContentView: View {
                                     let cookies = candidateCookies[candidateKey(url)] ?? []
                                     AppDiagnostics.shared.log("PLAYER", "从嗅探列表直接播放 url=\(AppDiagnostics.safeURL(url))")
                                     showingBrowserCandidates = false
-                                    openPlayer(url, cookies: cookies, referrer: currentPageURL)
+                                    let metadata = candidateMetadata[candidateKey(url)] ?? ""
+                                    let isHLS = metadata.hasPrefix("主播放列表") || metadata.hasPrefix("媒体播放列表")
+                                    let isDirect = metadata.hasPrefix("普通视频直链")
+                                    openPlayer(
+                                        url,
+                                        cookies: cookies,
+                                        referrer: currentPageURL,
+                                        downloadAction: (isHLS || isDirect) ? {
+                                            if isHLS {
+                                                downloadQueue.enqueueHLS(url, cookies: cookies)
+                                            } else {
+                                                downloadQueue.enqueueDirect(url, cookies: cookies, referrer: currentPageURL)
+                                            }
+                                        } : nil
+                                    )
                                 } label: { Label("播放", systemImage: "play.fill") }
                                     .buttonStyle(.borderedProminent).controlSize(.small)
                                 if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
@@ -377,18 +394,7 @@ struct ContentView: View {
             List {
                 Section("影视源") {
                     NavigationLink {
-                        TVBoxSourceView(onPlay: { playback in
-                            let asset = TVBoxPlaybackPreloader.shared.asset(for: playback.url)
-                            showingBrowserMenu = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                                openPlayer(
-                                    playback.url,
-                                    title: playback.videoTitle,
-                                    subtitle: "\(playback.sourceName) · \(playback.episodeName)",
-                                    preloadedAsset: asset
-                                )
-                            }
-                        })
+                        TVBoxSourceView(downloadQueue: downloadQueue)
                     } label: {
                         Label("TVBox 源解析", systemImage: "play.tv")
                     }
@@ -1382,7 +1388,8 @@ struct ContentView: View {
         referrer: URL? = nil,
         title: String? = nil,
         subtitle: String? = nil,
-        preloadedAsset: AVURLAsset? = nil
+        preloadedAsset: AVURLAsset? = nil,
+        downloadAction: (() -> Void)? = nil
     ) {
         guard playingURL == nil else { return }
         var headers = HTTPCookie.requestHeaderFields(with: cookies)
@@ -1391,6 +1398,7 @@ struct ContentView: View {
         playingTitle = title
         playingSubtitle = subtitle
         playingPreloadedAsset = preloadedAsset
+        playingDownloadAction = downloadAction
         AppDiagnostics.shared.log("PLAYER", "请求播放资源 title=\(title ?? url.lastPathComponent) remote=\(url.isFileURL ? "false" : "true") headers=\(headers.keys.sorted().joined(separator: ","))")
         playingURL = url
     }

@@ -8,7 +8,9 @@ private struct TVBoxSourceHistoryEntry: Codable, Identifiable {
 }
 
 struct TVBoxSourceView: View {
+    let downloadQueue: DownloadQueueManager
     @AppStorage("tvboxSourceHistory") private var sourceHistoryJSON = "[]"
+    @State private var activePlayback: TVBoxPlayback?
     @State private var sourceAddress = ""
     @State private var parsedSource: TVBoxParsedSource?
     @State private var isLoading = false
@@ -105,7 +107,7 @@ struct TVBoxSourceView: View {
                     ForEach(parsedSource.sites) { site in
                         if (site.type == 0 || site.type == 1) && site.searchable {
                             NavigationLink {
-                                TVBoxCatalogView(site: site, onPlay: onPlay)
+                                TVBoxCatalogView(site: site, onPlay: { playback in activePlayback = playback })
                             } label: {
                                 siteRow(site, enabled: true)
                             }
@@ -118,6 +120,23 @@ struct TVBoxSourceView: View {
         }
         .navigationTitle("TVBox 影视源")
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: Binding(
+            get: { activePlayback != nil },
+            set: { if !$0 { activePlayback = nil } }
+        )) {
+            if let playback = activePlayback {
+                HLSPlayerScreen(
+                    url: playback.url,
+                    title: playback.videoTitle,
+                    subtitle: "\(playback.sourceName) · \(playback.episodeName)",
+                    preloadedAsset: TVBoxPlaybackPreloader.shared.asset(for: playback.url),
+                    tvboxPlayback: playback,
+                    downloadQueue: downloadQueue,
+                    onClose: { activePlayback = nil }
+                )
+                .background(.black)
+            }
+        }
     }
 
     @ViewBuilder

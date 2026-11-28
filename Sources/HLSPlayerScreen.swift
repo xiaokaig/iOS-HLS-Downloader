@@ -8,7 +8,48 @@ struct HLSPlayerScreen: View {
     var title: String? = nil
     var subtitle: String? = nil
     var preloadedAsset: AVURLAsset? = nil
+    var tvboxPlayback: TVBoxPlayback? = nil
+    var downloadQueue: DownloadQueueManager? = nil
+    var onDownload: (() -> Void)? = nil
     let onClose: () -> Void
+
+    @State private var activePlayback: TVBoxPlayback?
+    @State private var showingEpisodePicker = false
+    @State private var downloadFeedback: String?
+
+    init(
+        url: URL,
+        headers: [String: String] = [:],
+        title: String? = nil,
+        subtitle: String? = nil,
+        preloadedAsset: AVURLAsset? = nil,
+        tvboxPlayback: TVBoxPlayback? = nil,
+        downloadQueue: DownloadQueueManager? = nil,
+        onDownload: (() -> Void)? = nil,
+        onClose: @escaping () -> Void
+    ) {
+        self.url = url
+        self.headers = headers
+        self.title = title
+        self.subtitle = subtitle
+        self.preloadedAsset = preloadedAsset
+        self.tvboxPlayback = tvboxPlayback
+        self.downloadQueue = downloadQueue
+        self.onDownload = onDownload
+        self.onClose = onClose
+        _activePlayback = State(initialValue: tvboxPlayback)
+    }
+
+    private var currentURL: URL { activePlayback?.url ?? url }
+    private var currentTitle: String { activePlayback?.videoTitle ?? title ?? displayName }
+    private var currentSubtitle: String {
+        if let activePlayback { return "\(activePlayback.sourceName) · \(activePlayback.episodeName)" }
+        return subtitle ?? (usesVLC ? "VLC 播放" : "正在播放")
+    }
+    private var canDownloadCurrent: Bool {
+        if activePlayback != nil { return Self.isDownloadable(currentURL) }
+        return onDownload != nil
+    }
 
     @State private var fillScreen = false
     @State private var orientationMode: PlayerOrientationMode = .automatic
@@ -25,12 +66,12 @@ struct HLSPlayerScreen: View {
     @State private var hideControlsTask: Task<Void, Never>?
 
     private var usesVLC: Bool {
-        ["ts", "mkv", "avi", "webm"].contains(url.pathExtension.lowercased())
+        ["ts", "mkv", "avi", "webm"].contains(currentURL.pathExtension.lowercased())
     }
 
     private var displayName: String {
         if let title, !title.isEmpty { return title }
-        let name = url.deletingPathExtension().lastPathComponent
+        let name = currentURL.deletingPathExtension().lastPathComponent
         return name.isEmpty ? "正在播放" : name
     }
 
@@ -40,10 +81,11 @@ struct HLSPlayerScreen: View {
 
             Group {
                 if usesVLC {
-                    VLCPlayerView(url: url, headers: headers, onStatusChange: { status in
+                    VLCPlayerView(url: currentURL, headers: headers, onStatusChange: { status in
                         vlcStatusMessage = status
                         if let status, status.hasPrefix("播放失败") { playerErrorMessage = status }
                     })
+                    .id(currentURL.absoluteString)
                 } else {
                     VideoPlayer(player: player)
                 }
@@ -99,6 +141,17 @@ struct HLSPlayerScreen: View {
                 .transition(.opacity)
             }
         }
+        .overlay(alignment: .bottom) {
+            if let downloadFeedback {
+                Text(downloadFeedback)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(.black.opacity(0.72), in: Capsule())
+                    .padding(.bottom, 26)
+            }
+        }
         .offset(y: dragOffset)
         .statusBarHidden(false)
         .contentShape(Rectangle())
@@ -131,28 +184,18 @@ struct HLSPlayerScreen: View {
                 }
         )
         .onAppear {
-            if !usesVLC {
-                let asset = preloadedAsset ?? AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
-                let item = AVPlayerItem(asset: asset)
-                itemObservation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
-                    DispatchQueue.main.async {
-                        playerItemStatus = observed.status
-                        if observed.status == .failed {
-                            playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
-                        }
-                    }
-                }
-                let newPlayer = AVPlayer(playerItem: item)
-                timeControlObservation = newPlayer.observe(\.timeControlStatus, options: [.initial, .new]) { observed, _ in
-                    DispatchQueue.main.async {
-                        isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
-                    }
-                }
-                newPlayer.allowsExternalPlayback = true
-                player = newPlayer
-                newPlayer.play()
-            }
+            if !usesVLC { configureAVPlayer() }
             scheduleControlsHide()
+        }
+        .onChange(of: currentURL) { _ in
+            playerErrorMessage = nil
+            vlcStatusMessage = "正在连接视频源…"
+            if !usesVLC { configureAVPlayer() }
+        }
+        .sheet(isPresented: $showingEpisodePicker) {
+            episodePicker
+                .presentationDetents([.medium, .large])
+                .presentationDragIndicator(.visible)
         }
         .onDisappear {
             requestOrientation(.automatic)
@@ -168,15 +211,37 @@ struct HLSPlayerScreen: View {
     private var header: some View {
         HStack(alignment: .top, spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(displayName)
+                Text(currentTitle)
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(subtitle ?? (usesVLC ? "VLC 播放" : "正在播放"))
+                Text(currentSubtitle)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.62))
             }
             Spacer(minLength: 12)
+            if activePlayback != nil {
+                Button { showingEpisodePicker = true } label: {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(.black.opacity(0.42), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+                }
+                .accessibilityLabel("选集和线路")
+            }
+            if canDownloadCurrent {
+                Button(action: downloadCurrent) {
+                    Image(systemName: "arrow.down.to.line")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(.black.opacity(0.42), in: Circle())
+                        .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+                }
+                .accessibilityLabel("下载当前视频")
+            }
             Button(action: closePlayer) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
@@ -263,6 +328,152 @@ struct HLSPlayerScreen: View {
                     .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
             }
             .accessibilityLabel(fillScreen ? "还原画面" : "填充画面")
+        }
+    }
+
+    private var episodePicker: some View {
+        NavigationStack {
+            List {
+                if let activePlayback {
+                    ForEach(activePlayback.playSources) { source in
+                        Section {
+                            ForEach(source.episodes) { episode in
+                                HStack(spacing: 10) {
+                                    Button {
+                                        selectEpisode(source: source, episode: episode)
+                                    } label: {
+                                        HStack(spacing: 9) {
+                                            Image(systemName: source.id == activePlayback.selectedSourceID && episode.id == activePlayback.selectedEpisodeID ? "checkmark.circle.fill" : "play.circle")
+                                                .foregroundStyle(source.id == activePlayback.selectedSourceID && episode.id == activePlayback.selectedEpisodeID ? .blue : .secondary)
+                                            Text(episode.name)
+                                                .foregroundStyle(.primary)
+                                            Spacer(minLength: 4)
+                                        }
+                                        .contentShape(Rectangle())
+                                    }
+                                    .buttonStyle(.plain)
+                                    if Self.isDownloadable(URL(string: episode.url) ?? URL(fileURLWithPath: "/")) {
+                                        Button {
+                                            enqueueTVBoxDownload(episode.url)
+                                        } label: {
+                                            Image(systemName: "arrow.down.circle")
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .accessibilityLabel("下载\(episode.name)")
+                                    }
+                                }
+                            }
+                        } header: {
+                            HStack {
+                                Text(source.name)
+                                Spacer()
+                                Button("下载本线路") {
+                                    for episode in source.episodes { enqueueTVBoxDownload(episode.url) }
+                                }
+                                .font(.caption)
+                                .disabled(!source.episodes.contains { Self.isDownloadable(URL(string: $0.url) ?? URL(fileURLWithPath: "/")) })
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("选集与线路")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("完成") { showingEpisodePicker = false }
+                }
+            }
+        }
+    }
+
+    private func selectEpisode(source: TVBoxPlaySource, episode: TVBoxEpisode) {
+        guard let nextURL = URL(string: episode.url),
+              ["http", "https"].contains(nextURL.scheme?.lowercased() ?? ""),
+              let playback = activePlayback else { return }
+        activePlayback = TVBoxPlayback(
+            videoTitle: playback.videoTitle,
+            sourceName: source.name,
+            episodeName: episode.name,
+            url: nextURL,
+            playSources: playback.playSources,
+            selectedSourceID: source.id,
+            selectedEpisodeID: episode.id
+        )
+        showingEpisodePicker = false
+        scheduleControlsHide()
+    }
+
+    private func downloadCurrent() {
+        if let activePlayback {
+            enqueueTVBoxDownload(activePlayback.url.absoluteString)
+        } else {
+            onDownload?()
+            downloadFeedback = "已加入下载队列"
+        }
+    }
+
+    private func enqueueTVBoxDownload(_ address: String) {
+        guard let queue = downloadQueue,
+              let target = URL(string: address),
+              Self.isDownloadable(target) else { return }
+        if target.pathExtension.lowercased() == "m3u8" {
+            queue.enqueueHLS(target)
+        } else {
+            queue.enqueueDirect(target)
+        }
+        downloadFeedback = "已加入下载队列"
+    }
+
+    private static func isDownloadable(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "m3u8" || ["mp4", "m4v", "mov", "ts", "mkv", "avi", "webm", "flv"].contains(ext)
+    }
+
+    @MainActor
+    private func configureAVPlayer() {
+        guard !usesVLC else { return }
+        itemObservation = nil
+        timeControlObservation = nil
+        player?.pause()
+        playerItemStatus = .unknown
+        isBuffering = true
+        let asset: AVURLAsset
+        if let activePlayback {
+            asset = TVBoxPlaybackPreloader.shared.asset(for: activePlayback.url)
+        } else if currentURL == url, let preloadedAsset {
+            asset = preloadedAsset
+        } else {
+            asset = AVURLAsset(url: currentURL, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        }
+        let item = AVPlayerItem(asset: asset)
+        itemObservation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
+            DispatchQueue.main.async {
+                playerItemStatus = observed.status
+                if observed.status == .failed {
+                    playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
+                }
+            }
+        }
+        if let player {
+            player.replaceCurrentItem(with: item)
+            timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { observed, _ in
+                DispatchQueue.main.async {
+                    isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                }
+            }
+            player.play()
+        } else {
+            let newPlayer = AVPlayer(playerItem: item)
+            timeControlObservation = newPlayer.observe(\.timeControlStatus, options: [.initial, .new]) { observed, _ in
+                DispatchQueue.main.async {
+                    isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                }
+            }
+            newPlayer.allowsExternalPlayback = true
+            player = newPlayer
+            newPlayer.play()
         }
     }
 

@@ -249,7 +249,15 @@ struct TVBoxVideoDetailView: View {
                                 }
                                 isStartingPlayback = true
                                 errorMessage = nil
-                                onPlay(TVBoxPlayback(videoTitle: video.name, sourceName: source.name, episodeName: episode.name, url: url))
+                                onPlay(TVBoxPlayback(
+                                    videoTitle: video.name,
+                                    sourceName: source.name,
+                                    episodeName: episode.name,
+                                    url: url,
+                                    playSources: detail?.playSources ?? [],
+                                    selectedSourceID: source.id,
+                                    selectedEpisodeID: episode.id
+                                ))
                             } label: {
                                 HStack {
                                     Image(systemName: "play.circle.fill").foregroundStyle(.blue)

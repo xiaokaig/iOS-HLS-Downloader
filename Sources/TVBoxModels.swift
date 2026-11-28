@@ -63,11 +63,16 @@ struct TVBoxPlaySource: Identifiable, Hashable {
     let episodes: [TVBoxEpisode]
 }
 
-struct TVBoxPlayback {
+struct TVBoxPlayback: Identifiable, Hashable {
     let videoTitle: String
     let sourceName: String
     let episodeName: String
     let url: URL
+    let playSources: [TVBoxPlaySource]
+    let selectedSourceID: String
+    let selectedEpisodeID: String
+
+    var id: String { url.absoluteString }
 }
 
 @MainActor
