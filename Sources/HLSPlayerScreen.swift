@@ -76,6 +76,7 @@ struct HLSPlayerScreen: View {
     @State private var vlcStatusMessage: String? = "正在连接视频源…"
     @State private var filteredPlaylistURL: URL?
     @State private var filteredPlaylistSourceURL: URL?
+    @State private var adFilterFailedSourceURL: URL?
     @State private var isPreparingFilteredPlaylist = false
     @State private var vlcIsPlaying = true
     @State private var vlcSeekRequest: Double?
@@ -233,6 +234,7 @@ struct HLSPlayerScreen: View {
             scheduleControlsHide()
         }
         .onChange(of: stripMarkedAds) { _ in
+            adFilterFailedSourceURL = nil
             if activePlayback != nil { configureCurrentPlayback() }
         }
         .onChange(of: currentURL) { _ in
@@ -579,6 +581,11 @@ struct HLSPlayerScreen: View {
     @MainActor
     private func configureCurrentPlayback() {
         if let activePlayback,
+           adFilterFailedSourceURL == activePlayback.url {
+            configureAVPlayer()
+            return
+        }
+        if let activePlayback,
            let filteredPlaylistURL,
            filteredPlaylistSourceURL == activePlayback.url,
            stripMarkedAds {
@@ -621,6 +628,7 @@ struct HLSPlayerScreen: View {
             } catch {
                 await MainActor.run {
                     isPreparingFilteredPlaylist = false
+                    adFilterFailedSourceURL = activePlayback.url
                     AppDiagnostics.shared.log("TVBOX", "广告过滤失败，回退原始播放列表：\(error.localizedDescription)")
                     configureAVPlayer()
                 }
@@ -657,6 +665,7 @@ struct HLSPlayerScreen: View {
                    let activePlayback,
                    filteredPlaylistSourceURL == activePlayback.url {
                     AppDiagnostics.shared.log("TVBOX", "过滤后播放列表无法播放，回退原始列表")
+                    adFilterFailedSourceURL = activePlayback.url
                     try? FileManager.default.removeItem(at: filteredPlaylistURL)
                     self.filteredPlaylistURL = nil
                     filteredPlaylistSourceURL = nil
