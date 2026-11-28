@@ -427,7 +427,7 @@ struct HLSPlayerScreen: View {
                                 Spacer()
                                 Button("下载本线路") {
                                     for episode in source.episodes {
-                                        enqueueTVBoxDownload(episode.url, fileName: "\\(activePlayback.videoTitle)_\\(episode.name)")
+                                        enqueueTVBoxDownload(episode.url, fileName: "\(activePlayback.videoTitle)_\(episode.name)")
                                     }
                                 }
                                 .font(.caption)

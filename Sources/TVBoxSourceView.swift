@@ -59,7 +59,7 @@ struct TVBoxSourceView: View {
                                         Button(role: .destructive) {
                                             removeHistoryEntry(entry.id)
                                         } label: {
-                                            Label("删除：\\(entry.title)", systemImage: "trash")
+                                            Label("删除：\(entry.title)", systemImage: "trash")
                                         }
                                     }
                                 }
@@ -125,7 +125,7 @@ struct TVBoxSourceView: View {
                             Text("继续上次观看的位置").font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Text("\\(TVBoxPlaybackHistory.shared.entries.count)")
+                        Text("\(TVBoxPlaybackHistory.shared.entries.count)")
                             .font(.caption.monospacedDigit().weight(.semibold))
                             .foregroundStyle(.secondary)
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
@@ -143,16 +143,16 @@ struct TVBoxSourceView: View {
                             Text("已加载").font(.caption.weight(.semibold)).foregroundStyle(.green)
                         }
                         LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
-                            sourceMetric("站点", value: "\\(parsedSource.siteCount)")
-                            sourceMetric("解析器", value: "\\(parsedSource.parseCount)")
-                            sourceMetric("直播", value: "\\(parsedSource.liveCount)")
+                            sourceMetric("站点", value: "\(parsedSource.siteCount)")
+                            sourceMetric("解析器", value: "\(parsedSource.parseCount)")
+                            sourceMetric("直播", value: "\(parsedSource.liveCount)")
                         }
                         if !sourceHost.isEmpty {
                             Label(sourceHost, systemImage: "server.rack")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         if let spider = parsedSource.spiderReference, !spider.isEmpty {
-                            Text("Spider：\\(spider)").font(.caption).foregroundStyle(.secondary)
+                            Text("Spider：\(spider)").font(.caption).foregroundStyle(.secondary)
                         }
                         Text("标准 XML/JSON CMS 支持分类片单、搜索、详情和直链播放。Spider、扩展 API、直播及解析器暂不执行。")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -164,7 +164,7 @@ struct TVBoxSourceView: View {
                         HStack {
                             Text("站点列表").font(.headline)
                             Spacer()
-                            Text("\\(parsedSource.sites.count) 个站点").font(.caption).foregroundStyle(.secondary)
+                            Text("\(parsedSource.sites.count) 个站点").font(.caption).foregroundStyle(.secondary)
                         }
                         ForEach(parsedSource.sites) { site in
                             if (site.type == 0 || site.type == 1) && site.searchable {
@@ -201,7 +201,7 @@ struct TVBoxSourceView: View {
                let cached = try? JSONDecoder().decode(TVBoxParsedSource.self, from: data) {
                 parsedSource = cached
                 sourceHost = URL(string: sourceAddress)?.host ?? ""
-                statusMessage = "已恢复上次成功解析的影视源（\\(cached.siteCount) 个站点）。"
+                statusMessage = "已恢复上次成功解析的影视源（\(cached.siteCount) 个站点）。"
             }
         }
         .fullScreenCover(isPresented: Binding(
@@ -212,7 +212,7 @@ struct TVBoxSourceView: View {
                 HLSPlayerScreen(
                     url: playback.url,
                     title: playback.videoTitle,
-                    subtitle: "\\(playback.sourceName) · \\(playback.episodeName)",
+                    subtitle: "\(playback.sourceName) · \(playback.episodeName)",
                     preloadedAsset: TVBoxPlaybackPreloader.shared.asset(for: playback.url),
                     tvboxPlayback: playback,
                     downloadQueue: downloadQueue,

@@ -261,15 +261,15 @@ final class HLSDownloadManager: ObservableObject {
         outputURL = finalURL
         preserveDestination = true
         try? FileManager.default.removeItem(at: taskDirectory)
-        let adSummary = stripMarkedAds && markedAdCount > 0 ? "（已跳过 \\(markedAdCount) 个广告分片）" : ""
+        let adSummary = stripMarkedAds && markedAdCount > 0 ? "（已跳过 \(markedAdCount) 个广告分片）" : ""
         if finalURL.pathExtension.lowercased() == "mp4" {
-            status = "下载完成（MP4）\\(adSummary)"
+            status = "下载完成（MP4）\(adSummary)"
         } else if conversionWarning?.contains("时间线断点") == true {
-            status = "下载完成（TS，保留原始时间线）\\(adSummary)"
+            status = "下载完成（TS，保留原始时间线）\(adSummary)"
         } else if conversionWarning != nil {
-            status = "下载完成（TS，MP4 转换失败）\\(adSummary)"
+            status = "下载完成（TS，MP4 转换失败）\(adSummary)"
         } else {
-            status = "下载完成（TS）\\(adSummary)"
+            status = "下载完成（TS）\(adSummary)"
         }
         return finalURL
     }
