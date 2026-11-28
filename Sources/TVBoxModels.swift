@@ -1,7 +1,7 @@
 import Foundation
 import AVFoundation
 
-struct TVBoxSite: Identifiable, Hashable {
+struct TVBoxSite: Identifiable, Hashable, Codable {
     let id: String
     let name: String
     let api: String
@@ -29,7 +29,7 @@ struct TVBoxSite: Identifiable, Hashable {
     }
 }
 
-struct TVBoxParsedSource {
+struct TVBoxParsedSource: Codable {
     let title: String
     let siteCount: Int
     let sites: [TVBoxSite]

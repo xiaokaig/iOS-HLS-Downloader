@@ -10,8 +10,9 @@ private struct TVBoxSourceHistoryEntry: Codable, Identifiable {
 struct TVBoxSourceView: View {
     let downloadQueue: DownloadQueueManager
     @AppStorage("tvboxSourceHistory") private var sourceHistoryJSON = "[]"
+    @AppStorage("tvboxCurrentSourceAddress") private var sourceAddress = ""
+    @AppStorage("tvboxParsedSourceCache") private var parsedSourceCacheJSON = ""
     @State private var activePlayback: TVBoxPlayback?
-    @State private var sourceAddress = ""
     @State private var parsedSource: TVBoxParsedSource?
     @State private var isLoading = false
     @State private var statusMessage = "首次使用请粘贴 TVBox JSON 源地址。"
@@ -30,10 +31,33 @@ struct TVBoxSourceView: View {
     var body: some View {
         List {
             Section("添加影视源") {
-                TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress)
-                    .keyboardType(.URL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
+                HStack(spacing: 8) {
+                    TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress)
+                        .keyboardType(.URL)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Menu {
+                        if sourceHistory.isEmpty {
+                            Text("暂无源历史")
+                        } else {
+                            ForEach(sourceHistory) { entry in
+                                Button {
+                                    sourceAddress = entry.url
+                                    statusMessage = "已填入历史源地址，点击「读取并保存源」开始读取。"
+                                } label: { Label(entry.title, systemImage: "clock") }
+                            }
+                            Divider()
+                            ForEach(sourceHistory) { entry in
+                                Button(role: .destructive) { removeHistoryEntry(entry.id) } label: {
+                                    Label("删除：\(entry.title)", systemImage: "trash")
+                                }
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath").font(.title3).frame(width: 34, height: 38)
+                    }
+                    .accessibilityLabel("选择或管理历史源")
+                }
                 Button {
                     Task { await importSource() }
                 } label: {
@@ -44,46 +68,6 @@ struct TVBoxSourceView: View {
                 }
                 .disabled(isLoading || sourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 Text(statusMessage).font(.caption).foregroundStyle(.secondary)
-            }
-
-            Section {
-                if sourceHistory.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "clock.arrow.circlepath").font(.largeTitle).foregroundStyle(.tertiary)
-                        Text("暂无源历史").font(.headline)
-                        Text("成功导入的影视源会保存在这里。").font(.caption).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity).padding(.vertical, 20)
-                } else {
-                    ForEach(sourceHistory) { entry in
-                        Button {
-                            sourceAddress = entry.url
-                            Task { await importSource(address: entry.url) }
-                        } label: {
-                            VStack(alignment: .leading, spacing: 5) {
-                                HStack {
-                                    Text(entry.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary)
-                                    Spacer()
-                                    Image(systemName: "arrow.clockwise").font(.caption).foregroundStyle(.secondary)
-                                }
-                                Text(entry.url).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                                Text(entry.lastUsed.formatted(date: .numeric, time: .shortened))
-                                    .font(.caption2).foregroundStyle(.tertiary)
-                            }
-                            .padding(.vertical, 4)
-                        }
-                        .buttonStyle(.plain)
-                        .swipeActions {
-                            Button(role: .destructive) { removeHistoryEntry(entry.id) } label: {
-                                Label("删除", systemImage: "trash")
-                            }
-                        }
-                    }
-                }
-            } header: {
-                Text("源历史记录（\(sourceHistory.count)）")
-            } footer: {
-                Text("点击历史记录即可重新读取该源。首次安装不预置任何影视源。")
             }
 
             if let parsedSource {
@@ -116,8 +100,17 @@ struct TVBoxSourceView: View {
                 }
             }
         }
-        .navigationTitle("TVBox 影视源")
+         .navigationTitle("TVBox 影视源")
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if parsedSource == nil, !parsedSourceCacheJSON.isEmpty,
+               let data = parsedSourceCacheJSON.data(using: .utf8),
+               let cached = try? JSONDecoder().decode(TVBoxParsedSource.self, from: data) {
+                parsedSource = cached
+                sourceHost = URL(string: sourceAddress)?.host ?? ""
+                statusMessage = "已恢复上次成功解析的影视源（\(cached.siteCount) 个站点）。"
+            }
+        }
         .fullScreenCover(isPresented: Binding(
             get: { activePlayback != nil },
             set: { if !$0 { activePlayback = nil } }
@@ -171,6 +164,9 @@ struct TVBoxSourceView: View {
             parsedSource = source
             sourceHost = finalURL.host ?? ""
             sourceAddress = rawAddress
+            if let data = try? JSONEncoder().encode(source), let cached = String(data: data, encoding: .utf8) {
+                parsedSourceCacheJSON = cached
+            }
             saveHistory(url: rawAddress, title: source.title)
             statusMessage = "读取成功：\(source.siteCount) 个站点，已加入源历史。"
         } catch {

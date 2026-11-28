@@ -234,12 +234,15 @@ final class HLSDownloadManager: ObservableObject {
 
         var finalURL = destination
         if !hasMap {
-            status = "正在尝试 MP4 转封装…"
-            do {
-                finalURL = try await remuxTransportStream(destination)
-            } catch {
-                // Keep the valid TS file; never disguise it with an .mp4 extension.
-                conversionWarning = "MP4 转换失败，已保留 TS 文件：\(error.localizedDescription)"
+            if mediaPlaylist.segments.contains(where: \.startsDiscontinuity) {
+                conversionWarning = "检测到 HLS 时间线断点（EXT-X-DISCONTINUITY），已跳过 MP4 转封装并保留原始 TS，避免转换时丢失后续画面。"
+            } else {
+                status = "正在尝试 MP4 转封装…"
+                do {
+                    finalURL = try await remuxTransportStream(destination)
+                } catch {
+                    conversionWarning = "MP4 完整性验证/转换失败，已保留原始 TS 文件：\(error.localizedDescription)"
+                }
             }
         }
         outputURL = finalURL
@@ -315,11 +318,27 @@ final class HLSDownloadManager: ObservableObject {
         do {
             let remuxer = VLCTSRemuxer()
             let result = try await remuxer.remux(source: sourceURL, destination: destination)
+            try await Self.validateRemuxedVideo(result)
             try? FileManager.default.removeItem(at: sourceURL)
             return result
         } catch {
             try? FileManager.default.removeItem(at: destination)
             throw error
+        }
+    }
+
+    private static func validateRemuxedVideo(_ url: URL) async throws {
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.load(.tracks)
+        guard let videoTrack = tracks.first(where: { $0.mediaType == .video }) else {
+            throw NSError(domain: "HLSRemuxValidation", code: 1, userInfo: [NSLocalizedDescriptionKey: "转换结果没有视频轨道"])
+        }
+        let assetDuration = CMTimeGetSeconds(try await asset.load(.duration))
+        let videoRange = try await videoTrack.load(.timeRange)
+        let videoDuration = CMTimeGetSeconds(videoRange.duration)
+        guard assetDuration.isFinite, videoDuration.isFinite, assetDuration > 0,
+              videoDuration >= assetDuration * 0.90 else {
+            throw NSError(domain: "HLSRemuxValidation", code: 2, userInfo: [NSLocalizedDescriptionKey: "视频轨道时长明显短于文件总时长（视频 \(Int(max(0, videoDuration))) 秒 / 文件 \(Int(max(0, assetDuration))) 秒）"])
         }
     }
 

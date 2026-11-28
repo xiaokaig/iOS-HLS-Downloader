@@ -29,6 +29,7 @@ enum HLSParser {
         var nextSequence = 0
         var rangeEnds: [String: Int64] = [:]
         var isEndList = false
+        var pendingDiscontinuity = false
 
         for line in lines where !line.isEmpty {
             if line.hasPrefix("#EXT-X-MEDIA-SEQUENCE:") {
@@ -64,6 +65,8 @@ enum HLSParser {
                 }
                 let range = attrs["BYTERANGE"].flatMap { parseRange($0, uri: mapURL.absoluteString, ends: &rangeEnds) }
                 currentMap = HLSMap(url: mapURL, byteRange: range)
+            } else if line == "#EXT-X-DISCONTINUITY" {
+                pendingDiscontinuity = true
             } else if line == "#EXT-X-ENDLIST" {
                 isEndList = true
             } else if !line.hasPrefix("#") {
@@ -89,11 +92,13 @@ enum HLSParser {
                     duration: pendingDuration,
                     byteRange: range,
                     key: currentKey,
-                    map: currentMap
+                    map: currentMap,
+                    startsDiscontinuity: pendingDiscontinuity
                 ))
                 nextSequence += 1
                 pendingDuration = 0
                 pendingRange = nil
+                pendingDiscontinuity = false
             }
         }
 
