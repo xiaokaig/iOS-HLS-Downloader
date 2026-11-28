@@ -286,7 +286,10 @@ private final class TVBoxXMLVideoParser: NSObject, XMLParserDelegate {
         }
         if current != nil, let currentKey {
             let value = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !value.isEmpty { current[currentKey] = value }
+            if !value.isEmpty, var record = current {
+                record[currentKey] = value
+                current = record
+            }
         }
         currentKey = nil
         text = ""

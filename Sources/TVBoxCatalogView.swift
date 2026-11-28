@@ -36,7 +36,13 @@ struct TVBoxCatalogView: View {
             if isSearching && results.isEmpty {
                 HStack { Spacer(); ProgressView("正在搜索…"); Spacer() }
             } else if results.isEmpty && hasSearched {
-                ContentUnavailableView("没有搜索结果", systemImage: "film", description: Text("换一个关键词试试。"))
+                VStack(spacing: 8) {
+                    Image(systemName: "film").font(.largeTitle).foregroundStyle(.tertiary)
+                    Text("没有搜索结果").font(.headline)
+                    Text("换一个关键词试试。").font(.caption).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 24)
             } else if !results.isEmpty {
                 Section("搜索结果 · \(results.count)") {
                     ForEach(results) { video in
