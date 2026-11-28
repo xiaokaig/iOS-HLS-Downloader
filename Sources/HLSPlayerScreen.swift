@@ -486,7 +486,7 @@ struct HLSPlayerScreen: View {
         if target.pathExtension.lowercased() == "m3u8" {
             queue.enqueueHLS(target, fileName: fileName, stripMarkedAds: stripMarkedAds)
         } else {
-            queue.enqueueDirect(target)
+            queue.enqueueDirect(target, fileName: fileName)
         }
         downloadFeedback = "已加入下载队列"
     }

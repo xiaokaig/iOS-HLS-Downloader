@@ -127,8 +127,9 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
 
     private var session: URLSession?
     private var task: URLSessionDownloadTask?
+    private var preferredFileName: String?
 
-    func start(url: URL, cookies: [HTTPCookie], referrer: URL?) {
+    func start(url: URL, cookies: [HTTPCookie], referrer: URL?, fileName: String? = nil) {
         guard !isDownloading else { return }
         var request = URLRequest(url: url)
         request.timeoutInterval = 180
@@ -146,6 +147,7 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         }
         if let referrer { request.setValue(referrer.absoluteString, forHTTPHeaderField: "Referer") }
 
+        preferredFileName = fileName
         progress = 0
         outputURL = nil
         status = "正在下载普通视频…"
@@ -193,8 +195,17 @@ final class DirectVideoDownloadManager: NSObject, ObservableObject, URLSessionDo
         case "video/x-msvideo": inferredExtension = "avi"
         default: inferredExtension = "mp4"
         }
-        let suggested = URL(fileURLWithPath: rawName).pathExtension.isEmpty
-            ? rawName + "." + inferredExtension : rawName
+        let responseExtension = URL(fileURLWithPath: rawName).pathExtension.isEmpty
+            ? inferredExtension : URL(fileURLWithPath: rawName).pathExtension
+        let suggested: String
+        if let preferredFileName, !preferredFileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let preferredURL = URL(fileURLWithPath: preferredFileName)
+            let stem = preferredURL.deletingPathExtension().lastPathComponent
+            let ext = preferredURL.pathExtension.isEmpty ? responseExtension : preferredURL.pathExtension
+            suggested = stem + "." + ext
+        } else {
+            suggested = URL(fileURLWithPath: rawName).pathExtension.isEmpty ? rawName + "." + inferredExtension : rawName
+        }
         let safeName = Self.safeFilename(suggested)
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         var destination = documents.appendingPathComponent(safeName)

@@ -15,17 +15,18 @@ enum DownloadQueueState: String {
 
 enum DownloadQueueKind {
     case hls(URL, [HTTPCookie], String?, Bool)
-    case direct(URL, [HTTPCookie], URL?)
+    case direct(URL, [HTTPCookie], URL?, String?)
 
     var sourceURL: URL {
         switch self {
         case .hls(let url, _, _, _): return url
-        case .direct(let url, _, _): return url
+        case .direct(let url, _, _, _): return url
         }
     }
 
     var title: String {
         if case .hls(_, _, let customName, _) = self, let customName, !customName.isEmpty { return customName }
+        if case .direct(_, _, _, let customName) = self, let customName, !customName.isEmpty { return customName }
         let name = sourceURL.lastPathComponent
         return name.isEmpty ? (sourceURL.host ?? "视频下载") : name
     }
@@ -66,7 +67,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
             manager.$conversionWarning.receive(on: DispatchQueue.main).sink { [weak self] in
                 self?.conversionWarning = $0
             }.store(in: &cancellables)
-        case .direct(_, _, _):
+        case .direct(_, _, _, _):
             let manager = DirectVideoDownloadManager()
             hlsManager = nil
             directManager = manager
@@ -110,11 +111,11 @@ final class DownloadQueueManager: ObservableObject {
     }
 
     @discardableResult
-    func enqueueDirect(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil) -> DownloadQueueItem {
+    func enqueueDirect(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil, fileName: String? = nil) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
             return existing
         }
-        let item = DownloadQueueItem(kind: .direct(url, cookies, referrer))
+        let item = DownloadQueueItem(kind: .direct(url, cookies, referrer, fileName))
         items.insert(item, at: 0)
         pump()
         return item
@@ -223,7 +224,7 @@ final class DownloadQueueManager: ObservableObject {
                     }
                 }
             }
-        } else if let direct = item.directManager, case .direct(let url, let cookies, let referrer) = item.kind {
+        } else if let direct = item.directManager, case .direct(let url, let cookies, let referrer, let fileName) = item.kind {
             direct.onCompletion = { [weak self, weak item] result in
                 Task { @MainActor in
                     guard let self, let item else { return }
@@ -236,7 +237,7 @@ final class DownloadQueueManager: ObservableObject {
             if direct.isPaused {
                 direct.resume()
             } else {
-                direct.start(url: url, cookies: cookies, referrer: referrer)
+                direct.start(url: url, cookies: cookies, referrer: referrer, fileName: fileName)
             }
         }
     }
