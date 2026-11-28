@@ -4,14 +4,15 @@ import VLCKit
 
 struct VLCPlayerView: UIViewRepresentable {
     let url: URL
-    func makeCoordinator() -> Coordinator { Coordinator(url: url) }
+    var headers: [String: String] = [:]
+    func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         let audioSession = AVAudioSession.sharedInstance()
         try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
         try? audioSession.setActive(true)
         context.coordinator.player.drawable = view
-        context.coordinator.player.media = VLCMedia(url: url)
+        context.coordinator.player.media = context.coordinator.makeMedia(url: url)
         context.coordinator.player.play()
         return view
     }
@@ -19,7 +20,7 @@ struct VLCPlayerView: UIViewRepresentable {
         guard context.coordinator.url != url else { return }
         context.coordinator.player.stop()
         context.coordinator.url = url
-        context.coordinator.player.media = VLCMedia(url: url)
+        context.coordinator.player.media = context.coordinator.makeMedia(url: url)
         context.coordinator.player.play()
     }
     static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
@@ -29,7 +30,16 @@ struct VLCPlayerView: UIViewRepresentable {
     final class Coordinator {
         let player = VLCMediaPlayer()
         var url: URL
-        init(url: URL) { self.url = url }
+        var headers: [String: String]
+        init(url: URL, headers: [String: String]) { self.url = url; self.headers = headers }
+        func makeMedia(url: URL) -> VLCMedia {
+            let media = VLCMedia(url: url)
+            var options: [String: Any] = [:]
+            if let value = headers["Referer"] { options[":http-referrer"] = value }
+            if let value = headers["Cookie"] { options[":http-cookie"] = value }
+            if !options.isEmpty { media.addOptions(options) }
+            return media
+        }
     }
 }
 

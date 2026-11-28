@@ -4,9 +4,13 @@ import UIKit
 
 struct HLSPlayerScreen: View {
     let url: URL
+    var headers: [String: String] = [:]
     let onClose: () -> Void
 
     @State private var fillScreen = false
+    @State private var orientationMode: PlayerOrientationMode = .automatic
+    @State private var playerErrorMessage: String?
+    @State private var itemObservation: NSKeyValueObservation?
     @State private var player: AVPlayer?
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
@@ -28,7 +32,7 @@ struct HLSPlayerScreen: View {
 
             Group {
                 if usesVLC {
-                    VLCPlayerView(url: url)
+                    VLCPlayerView(url: url, headers: headers)
                 } else {
                     VideoPlayer(player: player)
                 }
@@ -37,6 +41,19 @@ struct HLSPlayerScreen: View {
             .scaleEffect(fillScreen ? 1.12 : 1)
             .clipped()
             .ignoresSafeArea()
+
+            if let playerErrorMessage {
+                VStack {
+                    Spacer()
+                    Text(playerErrorMessage)
+                        .font(.footnote)
+                        .foregroundStyle(.white)
+                        .padding(12)
+                        .background(.red.opacity(0.75), in: RoundedRectangle(cornerRadius: 12))
+                    Spacer()
+                }
+                .padding(.horizontal, 24)
+            }
 
             if controlsVisible {
                 VStack(spacing: 0) {
@@ -87,7 +104,15 @@ struct HLSPlayerScreen: View {
         )
         .onAppear {
             if !usesVLC {
-                let newPlayer = AVPlayer(url: url)
+                let asset = AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                let item = AVPlayerItem(asset: asset)
+                itemObservation = item.observe(\.status, options: [.new]) { observed, _ in
+                    guard observed.status == .failed else { return }
+                    DispatchQueue.main.async {
+                        playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
+                    }
+                }
+                let newPlayer = AVPlayer(playerItem: item)
                 newPlayer.allowsExternalPlayback = true
                 player = newPlayer
                 newPlayer.play()
@@ -95,6 +120,8 @@ struct HLSPlayerScreen: View {
             scheduleControlsHide()
         }
         .onDisappear {
+            requestOrientation(.automatic)
+            itemObservation = nil
             hideControlsTask?.cancel()
             player?.pause()
             player?.replaceCurrentItem(with: nil)
@@ -140,6 +167,26 @@ struct HLSPlayerScreen: View {
 
     private var sideControls: some View {
         VStack(spacing: 12) {
+            Menu {
+                Button { setOrientation(.portrait) } label: {
+                    Label("竖屏", systemImage: orientationMode == .portrait ? "checkmark" : "iphone")
+                }
+                Button { setOrientation(.landscape) } label: {
+                    Label("横屏", systemImage: orientationMode == .landscape ? "checkmark" : "iphone.landscape")
+                }
+                Button { setOrientation(.automatic) } label: {
+                    Label("自动旋转", systemImage: orientationMode == .automatic ? "checkmark" : "arrow.triangle.2.circlepath")
+                }
+            } label: {
+                Image(systemName: orientationMode == .landscape ? "iphone.landscape" : "iphone")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(.black.opacity(0.46), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+            }
+            .accessibilityLabel("屏幕方向")
+
             if !usesVLC {
                 Menu {
                     ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
@@ -183,6 +230,27 @@ struct HLSPlayerScreen: View {
         }
     }
 
+    private func setOrientation(_ mode: PlayerOrientationMode) {
+        orientationMode = mode
+        requestOrientation(mode)
+        scheduleControlsHide()
+    }
+
+    private func requestOrientation(_ mode: PlayerOrientationMode) {
+        let mask: UIInterfaceOrientationMask
+        switch mode {
+        case .portrait: mask = .portrait
+        case .landscape: mask = [.landscapeLeft, .landscapeRight]
+        case .automatic: mask = .allButUpsideDown
+        }
+        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first else { return }
+        if #available(iOS 16.0, *) {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { error in
+                AppDiagnostics.shared.log("PLAYER", "方向切换失败：\(error.localizedDescription)")
+            }
+        }
+    }
+
     private func scheduleControlsHide() {
         hideControlsTask?.cancel()
         hideControlsTask = Task {
@@ -208,8 +276,13 @@ struct HLSPlayerScreen: View {
     }
 
     private func closePlayer() {
+        requestOrientation(.automatic)
         hideControlsTask?.cancel()
         player?.pause()
         onClose()
     }
+}
+
+private enum PlayerOrientationMode {
+    case portrait, landscape, automatic
 }

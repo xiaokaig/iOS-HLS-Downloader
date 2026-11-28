@@ -80,6 +80,7 @@ struct ContentView: View {
     // Local files
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
+    @State private var playingHeaders: [String: String] = [:]
 
     var body: some View {
         browserTab
@@ -311,6 +312,13 @@ struct ContentView: View {
                                 } label: {
                                     Label("复制地址", systemImage: "doc.on.doc")
                                 }.buttonStyle(.bordered).controlSize(.small)
+                                Button {
+                                    let cookies = candidateCookies[candidateKey(url)] ?? []
+                                    AppDiagnostics.shared.log("PLAYER", "从嗅探列表直接播放 url=\(AppDiagnostics.safeURL(url))")
+                                    showingBrowserCandidates = false
+                                    openPlayer(url, cookies: cookies, referrer: currentPageURL)
+                                } label: { Label("播放", systemImage: "play.fill") }
+                                    .buttonStyle(.borderedProminent).controlSize(.small)
                                 if (candidateMetadata[candidateKey(url)] ?? "").hasPrefix("普通视频直链") {
                                     Button {
                                         AppDiagnostics.shared.log("UI", "点击下载普通视频 url=\(AppDiagnostics.safeURL(url))")
@@ -343,6 +351,11 @@ struct ContentView: View {
     private var browserMenuSheet: some View {
         NavigationStack {
             List {
+                Section("影视源") {
+                    NavigationLink { TVBoxSourceView() } label: {
+                        Label("TVBox 源解析", systemImage: "play.tv")
+                    }
+                }
                 Section("下载器") {
                     ForEach(orderedMenuItems(browserMenuDownloadOrder, defaults: ["downloads", "files"]), id: \.self) { item in
                         browserMenuRow(item)
@@ -936,8 +949,7 @@ struct ContentView: View {
             set: { if !$0 { playingURL = nil } }
         )) {
             if let url = playingURL {
-                HLSPlayerScreen(url: url, onClose: { playingURL = nil })
-                    .ignoresSafeArea()
+                HLSPlayerScreen(url: url, headers: playingHeaders, onClose: { playingURL = nil; playingHeaders = [:] })
                     .background(.black)
             }
         }
@@ -1063,7 +1075,7 @@ struct ContentView: View {
                             if isTestingAList { ProgressView() }
                             else { Label("测试连接并保存", systemImage: "checkmark.icloud") }
                         }
-                        .disabled(isTestingAList || alistBaseURL.isEmpty || alistUsername.isEmpty || alistPassword.isEmpty)
+                        .disabled(isTestingAList || alistBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || alistUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || effectiveAListPassword.isEmpty)
                         Spacer()
                         Button("清除密码", role: .destructive) {
                             AListCredentialStore.deletePassword()
@@ -1326,9 +1338,12 @@ struct ContentView: View {
         }
     }
 
-    private func openPlayer(_ url: URL) {
+    private func openPlayer(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil) {
         guard playingURL == nil else { return }
-        AppDiagnostics.shared.log("PLAYER", "请求打开本地视频 file=\(url.lastPathComponent)")
+        var headers = HTTPCookie.requestHeaderFields(with: cookies)
+        if let referrer { headers["Referer"] = referrer.absoluteString }
+        playingHeaders = headers
+        AppDiagnostics.shared.log("PLAYER", "请求播放资源 remote=\(url.isFileURL ? "false" : "true") headers=\(headers.keys.sorted().joined(separator: ","))")
         playingURL = url
     }
 
@@ -1429,7 +1444,16 @@ struct ContentView: View {
         uploadToAList(fileURL)
     }
 
+    private var effectiveAListPassword: String {
+        alistPassword.isEmpty ? (AListCredentialStore.loadPassword() ?? "") : alistPassword
+    }
+
     private func testAListConnection() {
+        let password = effectiveAListPassword
+        guard !password.isEmpty else {
+            alistSettingsStatus = "密码为空：请重新输入，或检查本机钥匙串中是否保存了密码。"
+            return
+        }
         isTestingAList = true
         alistSettingsStatus = "正在连接 AList…"
         Task {
@@ -1437,15 +1461,18 @@ struct ContentView: View {
                 try await alistUploader.testConnection(
                     serverAddress: alistBaseURL,
                     username: alistUsername,
-                    password: alistPassword,
+                    password: password,
                     otpCode: alistOTPCode
                 )
-                try AListCredentialStore.save(password: alistPassword)
-                alistSettingsStatus = "连接成功，账号密码已安全保存"
+                try AListCredentialStore.save(password: password)
+                await MainActor.run {
+                    alistPassword = password
+                    alistSettingsStatus = "连接成功，账号密码已安全保存"
+                }
             } catch {
-                alistSettingsStatus = "连接失败：\(error.localizedDescription)"
+                await MainActor.run { alistSettingsStatus = "连接失败：\(error.localizedDescription)" }
             }
-            isTestingAList = false
+            await MainActor.run { isTestingAList = false }
         }
     }
 
