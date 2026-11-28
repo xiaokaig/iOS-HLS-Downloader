@@ -30,6 +30,8 @@ enum HLSParser {
         var rangeEnds: [String: Int64] = [:]
         var isEndList = false
         var pendingDiscontinuity = false
+        var isAdBreak = false
+        var adBreakRemaining: Double?
 
         for line in lines where !line.isEmpty {
             if line.hasPrefix("#EXT-X-MEDIA-SEQUENCE:") {
@@ -65,6 +67,21 @@ enum HLSParser {
                 }
                 let range = attrs["BYTERANGE"].flatMap { parseRange($0, uri: mapURL.absoluteString, ends: &rangeEnds) }
                 currentMap = HLSMap(url: mapURL, byteRange: range)
+            } else if line.hasPrefix("#EXT-X-CUE-OUT") || line.hasPrefix("#EXT-X-SCTE35-OUT:") {
+                isAdBreak = true
+                let raw = line.split(separator: ":", maxSplits: 1).last.map(String.init) ?? ""
+                let durationToken = raw.split(separator: ",").first.map(String.init) ?? ""
+                adBreakRemaining = Double(durationToken)
+            } else if line.hasPrefix("#EXT-X-CUE-IN") || line.hasPrefix("#EXT-X-SCTE35-IN:") {
+                isAdBreak = false
+                adBreakRemaining = nil
+            } else if line.hasPrefix("#EXT-X-DATERANGE:") {
+                let attrs = attributes(String(line.dropFirst("#EXT-X-DATERANGE:".count)))
+                let marker = ((attrs["CLASS"] ?? "") + " " + (attrs["SCTE35-OUT"] ?? "")).lowercased()
+                if marker.contains("ad") || attrs["SCTE35-OUT"] != nil {
+                    isAdBreak = true
+                    adBreakRemaining = Double(attrs["DURATION"] ?? "")
+                }
             } else if line == "#EXT-X-DISCONTINUITY" {
                 pendingDiscontinuity = true
             } else if line == "#EXT-X-ENDLIST" {
@@ -93,8 +110,13 @@ enum HLSParser {
                     byteRange: range,
                     key: currentKey,
                     map: currentMap,
-                    startsDiscontinuity: pendingDiscontinuity
+                    startsDiscontinuity: pendingDiscontinuity,
+                    isAd: isAdBreak
                 ))
+                if let remaining = adBreakRemaining {
+                    adBreakRemaining = max(0, remaining - pendingDuration)
+                    if adBreakRemaining == 0 { isAdBreak = false; adBreakRemaining = nil }
+                }
                 nextSequence += 1
                 pendingDuration = 0
                 pendingRange = nil

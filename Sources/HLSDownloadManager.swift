@@ -55,7 +55,7 @@ final class HLSDownloadManager: ObservableObject {
         try await inspectPlaylist(url, cookies: cookies).variants
     }
 
-    func start(url: URL, cookies: [HTTPCookie] = []) async throws -> URL {
+    func start(url: URL, cookies: [HTTPCookie] = [], fileName: String? = nil, stripMarkedAds: Bool = true) async throws -> URL {
         guard !isDownloading else { throw HLSDownloadError.unsupportedPlaylist }
         isDownloading = true
         progress = 0
@@ -82,12 +82,25 @@ final class HLSDownloadManager: ObservableObject {
         guard let mediaPlaylist = playlist else { throw HLSDownloadError.unsupportedPlaylist }
         guard mediaPlaylist.isEndList else { throw HLSDownloadError.livePlaylist }
         guard !mediaPlaylist.segments.isEmpty else { throw HLSParserError.emptyPlaylist }
+        let markedAdCount = mediaPlaylist.segments.filter(\.isAd).count
+        let downloadSegments = mediaPlaylist.segments.filter { !stripMarkedAds || !$0.isAd }
+        guard !downloadSegments.isEmpty else { throw HLSDownloadError.emptyDownload }
+        if stripMarkedAds && markedAdCount > 0 {
+            status = "已识别 \(markedAdCount) 个广告分片，正在跳过…"
+        }
 
-        let hasMap = mediaPlaylist.segments.contains { $0.map != nil }
+        let hasMap = downloadSegments.contains { $0.map != nil }
         let ext = hasMap ? "mp4" : "ts"
-        let filename = "HLS-\(UUID().uuidString.prefix(8)).\(ext)"
+        let safeBase = Self.safeFileName(fileName ?? url.deletingPathExtension().lastPathComponent)
         let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let destination = documents.appendingPathComponent(filename)
+        var filename = "\(safeBase).\(ext)"
+        var destination = documents.appendingPathComponent(filename)
+        var suffix = 2
+        while FileManager.default.fileExists(atPath: destination.path) {
+            filename = "\(safeBase) (\(suffix)).\(ext)"
+            destination = documents.appendingPathComponent(filename)
+            suffix += 1
+        }
         try? FileManager.default.removeItem(at: destination)
         guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
             throw HLSDownloadError.invalidResponse
@@ -99,13 +112,13 @@ final class HLSDownloadManager: ObservableObject {
             if !preserveDestination { try? FileManager.default.removeItem(at: destination) }
         }
 
-        let total = mediaPlaylist.segments.count
+        let total = downloadSegments.count
         let taskDirectory = persistentTaskDirectory(for: playlistURL)
         lastTaskDirectory = taskDirectory
         try FileManager.default.createDirectory(at: taskDirectory, withIntermediateDirectories: true)
         var signatureLines: [String] = []
-        signatureLines.reserveCapacity(mediaPlaylist.segments.count)
-        for segment in mediaPlaylist.segments {
+        signatureLines.reserveCapacity(downloadSegments.count)
+        for segment in downloadSegments {
             let range: String
             if let byteRange = segment.byteRange {
                 range = String(byteRange.offset) + ":" + String(byteRange.length)
@@ -149,7 +162,7 @@ final class HLSDownloadManager: ObservableObject {
             let concurrency = 6
             while nextIndex < min(concurrency, total) {
                 let index = nextIndex
-                let segment = mediaPlaylist.segments[index]
+                let segment = downloadSegments[index]
                 group.addTask {
                     try await self.downloadSegmentToCache(
                         segment, index: index, directory: taskDirectory, cookies: cookies
@@ -162,7 +175,7 @@ final class HLSDownloadManager: ObservableObject {
                 self.progress = Double(completed) / Double(total) * 0.75
                 if nextIndex < total {
                     let index = nextIndex
-                    let segment = mediaPlaylist.segments[index]
+                    let segment = downloadSegments[index]
                     group.addTask {
                         try await self.downloadSegmentToCache(
                             segment, index: index, directory: taskDirectory, cookies: cookies
@@ -175,7 +188,7 @@ final class HLSDownloadManager: ObservableObject {
 
         status = "后台按顺序组装视频…"
         var lastMap: HLSMap?
-        for (index, segment) in mediaPlaylist.segments.enumerated() {
+        for (index, segment) in downloadSegments.enumerated() {
             try Task.checkCancellation()
             if let map = segment.map, map != lastMap {
                 let mapTemp = try await fetchTemporaryFile(map.url, range: map.byteRange, cookies: cookies)
@@ -234,7 +247,7 @@ final class HLSDownloadManager: ObservableObject {
 
         var finalURL = destination
         if !hasMap {
-            if mediaPlaylist.segments.contains(where: \.startsDiscontinuity) {
+            if downloadSegments.contains(where: \.startsDiscontinuity) {
                 conversionWarning = "检测到 HLS 时间线断点（EXT-X-DISCONTINUITY），已跳过 MP4 转封装并保留原始 TS，避免转换时丢失后续画面。"
             } else {
                 status = "正在尝试 MP4 转封装…"
@@ -265,6 +278,15 @@ final class HLSDownloadManager: ObservableObject {
             try? FileManager.default.removeItem(at: directory)
             lastTaskDirectory = nil
         }
+    }
+
+    private static func safeFileName(_ value: String) -> String {
+        let forbidden = CharacterSet(charactersIn: "/\\\\:?%*|\"<>")
+            .union(.controlCharacters)
+        let cleaned = value.components(separatedBy: forbidden).filter { !$0.isEmpty }.joined(separator: "_")
+            .trimmingCharacters(in: CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ".")))
+        let shortened = String(cleaned.prefix(100))
+        return shortened.isEmpty ? "Video" : shortened
     }
 
     private func persistentTaskDirectory(for url: URL) -> URL {

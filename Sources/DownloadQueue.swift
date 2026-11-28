@@ -14,17 +14,18 @@ enum DownloadQueueState: String {
 }
 
 enum DownloadQueueKind {
-    case hls(URL, [HTTPCookie])
+    case hls(URL, [HTTPCookie], String?, Bool)
     case direct(URL, [HTTPCookie], URL?)
 
     var sourceURL: URL {
         switch self {
-        case .hls(let url, _): return url
+        case .hls(let url, _, _, _): return url
         case .direct(let url, _, _): return url
         }
     }
 
     var title: String {
+        if case .hls(_, _, let customName, _) = self, let customName, !customName.isEmpty { return customName }
         let name = sourceURL.lastPathComponent
         return name.isEmpty ? (sourceURL.host ?? "视频下载") : name
     }
@@ -50,7 +51,7 @@ final class DownloadQueueItem: ObservableObject, Identifiable {
     init(kind: DownloadQueueKind) {
         self.kind = kind
         switch kind {
-        case .hls(_, _):
+        case .hls(_, _, _, _):
             let manager = HLSDownloadManager()
             hlsManager = manager
             directManager = nil
@@ -98,11 +99,11 @@ final class DownloadQueueManager: ObservableObject {
     var queuedCount: Int { items.filter { $0.state == .queued }.count }
 
     @discardableResult
-    func enqueueHLS(_ url: URL, cookies: [HTTPCookie] = []) -> DownloadQueueItem {
+    func enqueueHLS(_ url: URL, cookies: [HTTPCookie] = [], fileName: String? = nil, stripMarkedAds: Bool = true) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
             return existing
         }
-        let item = DownloadQueueItem(kind: .hls(url, cookies))
+        let item = DownloadQueueItem(kind: .hls(url, cookies, fileName, stripMarkedAds))
         items.insert(item, at: 0)
         pump()
         return item
@@ -204,11 +205,11 @@ final class DownloadQueueManager: ObservableObject {
         item.state = .downloading
         item.errorMessage = nil
 
-        if let hls = item.hlsManager, case .hls(let url, let cookies) = item.kind {
+        if let hls = item.hlsManager, case .hls(let url, let cookies, let fileName, let stripMarkedAds) = item.kind {
             item.runner = Task { [weak self, weak item] in
                 guard let item else { return }
                 do {
-                    let output = try await hls.start(url: url, cookies: cookies)
+                    let output = try await hls.start(url: url, cookies: cookies, fileName: fileName, stripMarkedAds: stripMarkedAds)
                     self?.finish(item, output: output)
                 } catch {
                     if error is CancellationError || Task.isCancelled {

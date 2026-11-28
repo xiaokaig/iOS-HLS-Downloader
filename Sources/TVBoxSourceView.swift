@@ -30,93 +30,169 @@ struct TVBoxSourceView: View {
     }
 
     var body: some View {
-        List {
-            Section("添加影视源") {
-                HStack(spacing: 8) {
-                    TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                VStack(alignment: .leading, spacing: 13) {
+                    HStack {
+                        Label("当前影视源", systemImage: "dot.radiowaves.left.and.right")
+                            .font(.headline)
+                        Spacer()
+                        Menu {
+                            if sourceHistory.isEmpty {
+                                Text("暂无源历史")
+                            } else {
+                                Section("最近使用") {
+                                    ForEach(sourceHistory) { entry in
+                                        Button {
+                                            sourceAddress = entry.url
+                                            statusMessage = "已填入历史源地址；点击读取按钮才会切换。"
+                                        } label: {
+                                            VStack(alignment: .leading, spacing: 2) {
+                                                Text(entry.title)
+                                                Text(entry.url).font(.caption2).lineLimit(1)
+                                            }
+                                        }
+                                    }
+                                }
+                                Section("管理历史") {
+                                    ForEach(sourceHistory) { entry in
+                                        Button(role: .destructive) {
+                                            removeHistoryEntry(entry.id)
+                                        } label: {
+                                            Label("删除：\\(entry.title)", systemImage: "trash")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            Label("历史源", systemImage: "clock.arrow.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 12).padding(.vertical, 9)
+                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                        }
+                        .accessibilityLabel("历史影视源")
+                    }
+
+                    Text("源地址")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress, axis: .vertical)
+                        .font(.system(.subheadline, design: .rounded))
                         .keyboardType(.URL)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                    Menu {
-                        if sourceHistory.isEmpty {
-                            Text("暂无源历史")
-                        } else {
-                            ForEach(sourceHistory) { entry in
-                                Button {
-                                    sourceAddress = entry.url
-                                    statusMessage = "已填入历史源地址，点击「读取并保存源」开始读取。"
-                                } label: { Label(entry.title, systemImage: "clock") }
-                            }
-                            Divider()
-                            ForEach(sourceHistory) { entry in
-                                Button(role: .destructive) { removeHistoryEntry(entry.id) } label: {
-                                    Label("删除：\(entry.title)", systemImage: "trash")
-                                }
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "clock.arrow.circlepath").font(.title3).frame(width: 34, height: 38)
-                    }
-                    .accessibilityLabel("选择或管理历史源")
-                }
-                Button {
-                    Task { await importSource() }
-                } label: {
-                    HStack {
-                        if isLoading { ProgressView() }
-                        Label(isLoading ? "正在读取…" : "读取并保存源", systemImage: "arrow.down.doc")
-                    }
-                }
-                .disabled(isLoading || sourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                Text(statusMessage).font(.caption).foregroundStyle(.secondary)
-            }
+                        .textFieldStyle(.roundedBorder)
+                        .lineLimit(2...4)
 
-            Section {
+                    Button {
+                        Task { await importSource() }
+                    } label: {
+                        HStack {
+                            Spacer()
+                            if isLoading { ProgressView().tint(.white) }
+                            Label(isLoading ? "正在读取影视源…" : "读取并切换源", systemImage: "arrow.triangle.2.circlepath")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
+                        }
+                        .padding(.vertical, 13)
+                        .foregroundStyle(.white)
+                        .background(Color.accentColor, in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .disabled(isLoading || sourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Text(statusMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(16)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+
                 NavigationLink {
                     TVBoxPlaybackHistoryView { playback, position in
                         activePlayback = playback
                         activeResumePosition = position
                     }
                 } label: {
-                    Label("播放历史", systemImage: "play.rectangle.on.rectangle")
-                }
-                .badge(TVBoxPlaybackHistory.shared.entries.count)
-            }
-
-            if let parsedSource {
-                Section {
-                    LabeledContent("站点数量", value: "\(parsedSource.siteCount)")
-                    LabeledContent("解析器", value: "\(parsedSource.parseCount)")
-                    LabeledContent("直播配置", value: "\(parsedSource.liveCount)")
-                    if let spider = parsedSource.spiderReference, !spider.isEmpty {
-                        LabeledContent("Spider 依赖", value: spider)
+                    HStack(spacing: 12) {
+                        Image(systemName: "play.rectangle.on.rectangle")
+                            .font(.title2).foregroundStyle(Color.accentColor)
+                            .frame(width: 42, height: 42)
+                            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("播放历史").font(.subheadline.weight(.semibold))
+                            Text("继续上次观看的位置").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text("\\(TVBoxPlaybackHistory.shared.entries.count)")
+                            .font(.caption.monospacedDigit().weight(.semibold))
+                            .foregroundStyle(.secondary)
+                        Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundStyle(.tertiary)
                     }
-                    if !sourceHost.isEmpty { LabeledContent("来源主机", value: sourceHost) }
-                } header: {
-                    Text("当前源：\(parsedSource.title)")
-                } footer: {
-                    Text("标准 XML/JSON CMS 支持分类片单、搜索、详情和直链播放。Spider、扩展 API、直播及解析器暂不执行。")
+                    .padding(14)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
                 }
+                .buttonStyle(.plain)
 
-                Section("站点列表（\(parsedSource.sites.count)）") {
-                    ForEach(parsedSource.sites) { site in
-                        if (site.type == 0 || site.type == 1) && site.searchable {
-                            NavigationLink {
-                                TVBoxCatalogView(site: site, onPlay: { playback in
-                                    activeResumePosition = 0
-                                    activePlayback = playback
-                                    TVBoxPlaybackHistory.shared.record(playback, position: 0, duration: 0)
-                                })
-                            } label: {
-                                siteRow(site, enabled: true)
+                if let parsedSource {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(parsedSource.title).font(.title3.weight(.bold))
+                            Spacer()
+                            Text("已加载").font(.caption.weight(.semibold)).foregroundStyle(.green)
+                        }
+                        LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 10) {
+                            sourceMetric("站点", value: "\\(parsedSource.siteCount)")
+                            sourceMetric("解析器", value: "\\(parsedSource.parseCount)")
+                            sourceMetric("直播", value: "\\(parsedSource.liveCount)")
+                        }
+                        if !sourceHost.isEmpty {
+                            Label(sourceHost, systemImage: "server.rack")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        if let spider = parsedSource.spiderReference, !spider.isEmpty {
+                            Text("Spider：\\(spider)").font(.caption).foregroundStyle(.secondary)
+                        }
+                        Text("标准 XML/JSON CMS 支持分类片单、搜索、详情和直链播放。Spider、扩展 API、直播及解析器暂不执行。")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    .padding(16)
+                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
+
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("站点列表").font(.headline)
+                            Spacer()
+                            Text("\\(parsedSource.sites.count) 个站点").font(.caption).foregroundStyle(.secondary)
+                        }
+                        ForEach(parsedSource.sites) { site in
+                            if (site.type == 0 || site.type == 1) && site.searchable {
+                                NavigationLink {
+                                    TVBoxCatalogView(site: site, onPlay: { playback in
+                                        activeResumePosition = 0
+                                        activePlayback = playback
+                                        TVBoxPlaybackHistory.shared.record(playback, position: 0, duration: 0)
+                                    })
+                                } label: {
+                                    siteRow(site, enabled: true)
+                                        .padding(12)
+                                        .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+                                }
+                                .buttonStyle(.plain)
+                            } else {
+                                siteRow(site, enabled: false)
+                                    .padding(12)
+                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
                             }
-                        } else {
-                            siteRow(site, enabled: false)
                         }
                     }
                 }
             }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 14)
         }
+        .background(Color(uiColor: .systemGroupedBackground))
         .navigationTitle("TVBox 影视源")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
@@ -125,7 +201,7 @@ struct TVBoxSourceView: View {
                let cached = try? JSONDecoder().decode(TVBoxParsedSource.self, from: data) {
                 parsedSource = cached
                 sourceHost = URL(string: sourceAddress)?.host ?? ""
-                statusMessage = "已恢复上次成功解析的影视源（\(cached.siteCount) 个站点）。"
+                statusMessage = "已恢复上次成功解析的影视源（\\(cached.siteCount) 个站点）。"
             }
         }
         .fullScreenCover(isPresented: Binding(
@@ -136,7 +212,7 @@ struct TVBoxSourceView: View {
                 HLSPlayerScreen(
                     url: playback.url,
                     title: playback.videoTitle,
-                    subtitle: "\(playback.sourceName) · \(playback.episodeName)",
+                    subtitle: "\\(playback.sourceName) · \\(playback.episodeName)",
                     preloadedAsset: TVBoxPlaybackPreloader.shared.asset(for: playback.url),
                     tvboxPlayback: playback,
                     downloadQueue: downloadQueue,
@@ -149,6 +225,16 @@ struct TVBoxSourceView: View {
                 .background(.black)
             }
         }
+    }
+
+    private func sourceMetric(_ title: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(value).font(.title3.weight(.bold).monospacedDigit())
+            Text(title).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 10))
     }
 
     @ViewBuilder

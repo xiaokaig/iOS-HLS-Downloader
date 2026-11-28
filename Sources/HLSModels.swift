@@ -33,6 +33,7 @@ struct HLSSegment: Identifiable {
     let key: HLSKey?
     let map: HLSMap?
     let startsDiscontinuity: Bool
+    let isAd: Bool
 }
 
 struct HLSPlaylist {

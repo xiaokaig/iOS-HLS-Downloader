@@ -18,6 +18,7 @@ struct HLSPlayerScreen: View {
     @State private var activePlayback: TVBoxPlayback?
     @State private var showingEpisodePicker = false
     @State private var downloadFeedback: String?
+    @AppStorage("hlsStripMarkedAds") private var stripMarkedAds = true
 
     init(
         url: URL,
@@ -297,6 +298,17 @@ struct HLSPlayerScreen: View {
                 .accessibilityLabel("选集和线路")
             }
             if canDownloadCurrent {
+                Menu {
+                    Toggle("跳过播放列表标记的广告", isOn: $stripMarkedAds)
+                } label: {
+                    Label("去广告", systemImage: "scissors")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 11)
+                        .frame(height: 42)
+                        .background(.black.opacity(0.52), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                }
                 Button(action: downloadCurrent) {
                     Label("下载", systemImage: "arrow.down.to.line")
                         .font(.system(size: 13, weight: .semibold))
@@ -399,7 +411,7 @@ struct HLSPlayerScreen: View {
                                     .buttonStyle(.plain)
                                     if Self.isDownloadable(URL(string: episode.url) ?? URL(fileURLWithPath: "/")) {
                                         Button {
-                                            enqueueTVBoxDownload(episode.url)
+                                            enqueueTVBoxDownload(episode.url, fileName: "\(activePlayback.videoTitle)_\(episode.name)")
                                         } label: {
                                             Image(systemName: "arrow.down.circle")
                                                 .foregroundStyle(.secondary)
@@ -458,19 +470,19 @@ struct HLSPlayerScreen: View {
 
     private func downloadCurrent() {
         if let activePlayback {
-            enqueueTVBoxDownload(activePlayback.url.absoluteString)
+            enqueueTVBoxDownload(activePlayback.url.absoluteString, fileName: "\(activePlayback.videoTitle)_\(activePlayback.episodeName)")
         } else {
             onDownload?()
             downloadFeedback = "已加入下载队列"
         }
     }
 
-    private func enqueueTVBoxDownload(_ address: String) {
+    private func enqueueTVBoxDownload(_ address: String, fileName: String? = nil) {
         guard let queue = downloadQueue,
               let target = URL(string: address),
               Self.isDownloadable(target) else { return }
         if target.pathExtension.lowercased() == "m3u8" {
-            queue.enqueueHLS(target)
+            queue.enqueueHLS(target, fileName: fileName, stripMarkedAds: stripMarkedAds)
         } else {
             queue.enqueueDirect(target)
         }
