@@ -455,11 +455,11 @@ final class HLSDownloadManager: ObservableObject {
         exporter.outputURL = destination
         exporter.outputFileType = .mp4
         exporter.shouldOptimizeForNetworkUse = true
-        try await withCheckedThrowingContinuation { continuation in
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             exporter.exportAsynchronously {
                 switch exporter.status {
                 case .completed:
-                    continuation.resume()
+                    continuation.resume(returning: ())
                 case .failed, .cancelled:
                     continuation.resume(throwing: exporter.error ?? NSError(
                         domain: "HLSRemux",
