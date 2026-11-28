@@ -258,6 +258,7 @@ struct TVBoxVideoDetailView: View {
                                     selectedSourceID: source.id,
                                     selectedEpisodeID: episode.id
                                 ))
+                                isStartingPlayback = false
                             } label: {
                                 HStack {
                                     Image(systemName: "play.circle.fill").foregroundStyle(.blue)

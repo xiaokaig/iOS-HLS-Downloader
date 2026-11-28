@@ -17,8 +17,6 @@ struct TVBoxSourceView: View {
     @State private var statusMessage = "首次使用请粘贴 TVBox JSON 源地址。"
     @State private var sourceHost = ""
 
-    let onPlay: (TVBoxPlayback) -> Void
-
     private var sourceHistory: [TVBoxSourceHistoryEntry] {
         guard let data = sourceHistoryJSON.data(using: .utf8) else { return [] }
         let decoder = JSONDecoder()

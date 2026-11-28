@@ -129,8 +129,9 @@ struct HLSPlayerScreen: View {
                 VStack(spacing: 0) {
                     header
                     Spacer(minLength: 20)
-                    HStack {
-                        Spacer()
+                    HStack(alignment: .bottom, spacing: 14) {
+                        bottomActions
+                        Spacer(minLength: 12)
                         sideControls
                     }
                     Spacer(minLength: 20)
@@ -190,7 +191,16 @@ struct HLSPlayerScreen: View {
         .onChange(of: currentURL) { _ in
             playerErrorMessage = nil
             vlcStatusMessage = "正在连接视频源…"
-            if !usesVLC { configureAVPlayer() }
+            downloadFeedback = nil
+            if usesVLC {
+                player?.pause()
+                player?.replaceCurrentItem(with: nil)
+                player = nil
+                itemObservation = nil
+                timeControlObservation = nil
+            } else {
+                configureAVPlayer()
+            }
         }
         .sheet(isPresented: $showingEpisodePicker) {
             episodePicker
@@ -220,28 +230,6 @@ struct HLSPlayerScreen: View {
                     .foregroundStyle(.white.opacity(0.62))
             }
             Spacer(minLength: 12)
-            if activePlayback != nil {
-                Button { showingEpisodePicker = true } label: {
-                    Image(systemName: "list.bullet")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(.black.opacity(0.42), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-                }
-                .accessibilityLabel("选集和线路")
-            }
-            if canDownloadCurrent {
-                Button(action: downloadCurrent) {
-                    Image(systemName: "arrow.down.to.line")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(.white)
-                        .frame(width: 38, height: 38)
-                        .background(.black.opacity(0.42), in: Circle())
-                        .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
-                }
-                .accessibilityLabel("下载当前视频")
-            }
             Button(action: closePlayer) {
                 Image(systemName: "xmark")
                     .font(.system(size: 15, weight: .semibold))
@@ -263,6 +251,35 @@ struct HLSPlayerScreen: View {
             .padding(.horizontal, -22)
             .padding(.top, -12)
             .allowsHitTesting(false)
+        }
+    }
+
+    private var bottomActions: some View {
+        HStack(spacing: 10) {
+            if activePlayback != nil {
+                Button { showingEpisodePicker = true } label: {
+                    Label("选集", systemImage: "list.bullet")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(height: 42)
+                        .background(.black.opacity(0.52), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                }
+                .accessibilityLabel("选集和线路")
+            }
+            if canDownloadCurrent {
+                Button(action: downloadCurrent) {
+                    Label("下载", systemImage: "arrow.down.to.line")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .frame(height: 42)
+                        .background(.black.opacity(0.52), in: Capsule())
+                        .overlay(Capsule().stroke(.white.opacity(0.16), lineWidth: 1))
+                }
+                .accessibilityLabel("下载当前视频")
+            }
         }
     }
 
