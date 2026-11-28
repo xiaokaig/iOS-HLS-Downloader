@@ -10,6 +10,8 @@ struct HLSPlayerScreen: View {
     var preloadedAsset: AVURLAsset? = nil
     var tvboxPlayback: TVBoxPlayback? = nil
     var downloadQueue: DownloadQueueManager? = nil
+    var resumePosition: Double = 0
+    var onPlaybackProgress: ((TVBoxPlayback, Double, Double) -> Void)? = nil
     var onDownload: (() -> Void)? = nil
     let onClose: () -> Void
 
@@ -25,6 +27,8 @@ struct HLSPlayerScreen: View {
         preloadedAsset: AVURLAsset? = nil,
         tvboxPlayback: TVBoxPlayback? = nil,
         downloadQueue: DownloadQueueManager? = nil,
+        resumePosition: Double = 0,
+        onPlaybackProgress: ((TVBoxPlayback, Double, Double) -> Void)? = nil,
         onDownload: (() -> Void)? = nil,
         onClose: @escaping () -> Void
     ) {
@@ -35,6 +39,8 @@ struct HLSPlayerScreen: View {
         self.preloadedAsset = preloadedAsset
         self.tvboxPlayback = tvboxPlayback
         self.downloadQueue = downloadQueue
+        self.resumePosition = resumePosition
+        self.onPlaybackProgress = onPlaybackProgress
         self.onDownload = onDownload
         self.onClose = onClose
         _activePlayback = State(initialValue: tvboxPlayback)
@@ -60,6 +66,8 @@ struct HLSPlayerScreen: View {
     @State private var isBuffering = true
     @State private var vlcStatusMessage: String? = "正在连接视频源…"
     @State private var player: AVPlayer?
+    @State private var periodicTimeObserver: Any?
+    @State private var resumeAppliedURL = ""
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
     @State private var controlsVisible = true
@@ -212,6 +220,9 @@ struct HLSPlayerScreen: View {
             itemObservation = nil
             timeControlObservation = nil
             hideControlsTask?.cancel()
+            savePlaybackProgress()
+            if let periodicTimeObserver, let player { player.removeTimeObserver(periodicTimeObserver) }
+            periodicTimeObserver = nil
             player?.pause()
             player?.replaceCurrentItem(with: nil)
             player = nil
@@ -409,6 +420,8 @@ struct HLSPlayerScreen: View {
         guard let nextURL = URL(string: episode.url),
               ["http", "https"].contains(nextURL.scheme?.lowercased() ?? ""),
               let playback = activePlayback else { return }
+        savePlaybackProgress()
+        resumeAppliedURL = ""
         activePlayback = TVBoxPlayback(
             videoTitle: playback.videoTitle,
             sourceName: source.name,
@@ -470,10 +483,16 @@ struct HLSPlayerScreen: View {
                 playerItemStatus = observed.status
                 if observed.status == .failed {
                     playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
+                } else if observed.status == .readyToPlay,
+                          resumePosition > 0,
+                          resumeAppliedURL != currentURL.absoluteString {
+                    resumeAppliedURL = currentURL.absoluteString
+                    player?.seek(to: CMTime(seconds: resumePosition, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
                 }
             }
         }
         if let player {
+            if let periodicTimeObserver { player.removeTimeObserver(periodicTimeObserver); self.periodicTimeObserver = nil }
             player.replaceCurrentItem(with: item)
             timeControlObservation = player.observe(\.timeControlStatus, options: [.initial, .new]) { observed, _ in
                 DispatchQueue.main.async {
@@ -491,6 +510,17 @@ struct HLSPlayerScreen: View {
             newPlayer.allowsExternalPlayback = true
             player = newPlayer
             newPlayer.play()
+        }
+        if let player {
+            periodicTimeObserver = player.addPeriodicTimeObserver(
+                forInterval: CMTime(seconds: 10, preferredTimescale: 600),
+                queue: .main
+            ) { time in
+                guard let activePlayback,
+                      time.seconds.isFinite, time.seconds >= 0 else { return }
+                let duration = player.currentItem?.duration.seconds ?? 0
+                onPlaybackProgress?(activePlayback, time.seconds, duration.isFinite ? duration : 0)
+            }
         }
     }
 
@@ -539,7 +569,16 @@ struct HLSPlayerScreen: View {
         scheduleControlsHide()
     }
 
+    private func savePlaybackProgress() {
+        guard let activePlayback, let player else { return }
+        let position = player.currentTime().seconds
+        let duration = player.currentItem?.duration.seconds ?? 0
+        guard position.isFinite, position >= 0 else { return }
+        onPlaybackProgress?(activePlayback, position, duration.isFinite ? duration : 0)
+    }
+
     private func closePlayer() {
+        savePlaybackProgress()
         requestOrientation(.automatic)
         hideControlsTask?.cancel()
         player?.pause()

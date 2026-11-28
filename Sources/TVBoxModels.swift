@@ -51,19 +51,19 @@ struct TVBoxVideo: Identifiable, Hashable {
     let content: String
 }
 
-struct TVBoxEpisode: Identifiable, Hashable {
+struct TVBoxEpisode: Identifiable, Hashable, Codable {
     let id: String
     let name: String
     let url: String
 }
 
-struct TVBoxPlaySource: Identifiable, Hashable {
+struct TVBoxPlaySource: Identifiable, Hashable, Codable {
     let id: String
     let name: String
     let episodes: [TVBoxEpisode]
 }
 
-struct TVBoxPlayback: Identifiable, Hashable {
+struct TVBoxPlayback: Identifiable, Hashable, Codable {
     let videoTitle: String
     let sourceName: String
     let episodeName: String

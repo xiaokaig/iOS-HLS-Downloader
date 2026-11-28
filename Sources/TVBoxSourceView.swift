@@ -13,6 +13,7 @@ struct TVBoxSourceView: View {
     @AppStorage("tvboxCurrentSourceAddress") private var sourceAddress = ""
     @AppStorage("tvboxParsedSourceCache") private var parsedSourceCacheJSON = ""
     @State private var activePlayback: TVBoxPlayback?
+    @State private var activeResumePosition = 0.0
     @State private var parsedSource: TVBoxParsedSource?
     @State private var isLoading = false
     @State private var statusMessage = "首次使用请粘贴 TVBox JSON 源地址。"
@@ -70,6 +71,18 @@ struct TVBoxSourceView: View {
                 Text(statusMessage).font(.caption).foregroundStyle(.secondary)
             }
 
+            Section {
+                NavigationLink {
+                    TVBoxPlaybackHistoryView { playback, position in
+                        activePlayback = playback
+                        activeResumePosition = position
+                    }
+                } label: {
+                    Label("播放历史", systemImage: "play.rectangle.on.rectangle")
+                }
+                .badge(TVBoxPlaybackHistory.shared.entries.count)
+            }
+
             if let parsedSource {
                 Section {
                     LabeledContent("站点数量", value: "\(parsedSource.siteCount)")
@@ -89,7 +102,11 @@ struct TVBoxSourceView: View {
                     ForEach(parsedSource.sites) { site in
                         if (site.type == 0 || site.type == 1) && site.searchable {
                             NavigationLink {
-                                TVBoxCatalogView(site: site, onPlay: { playback in activePlayback = playback })
+                                TVBoxCatalogView(site: site, onPlay: { playback in
+                                    activeResumePosition = 0
+                                    activePlayback = playback
+                                    TVBoxPlaybackHistory.shared.record(playback, position: 0, duration: 0)
+                                })
                             } label: {
                                 siteRow(site, enabled: true)
                             }
@@ -123,7 +140,11 @@ struct TVBoxSourceView: View {
                     preloadedAsset: TVBoxPlaybackPreloader.shared.asset(for: playback.url),
                     tvboxPlayback: playback,
                     downloadQueue: downloadQueue,
-                    onClose: { activePlayback = nil }
+                    resumePosition: activeResumePosition,
+                    onPlaybackProgress: { item, position, duration in
+                        TVBoxPlaybackHistory.shared.record(item, position: position, duration: duration)
+                    },
+                    onClose: { activePlayback = nil; activeResumePosition = 0 }
                 )
                 .background(.black)
             }
