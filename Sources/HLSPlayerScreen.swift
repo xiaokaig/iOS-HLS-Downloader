@@ -48,7 +48,14 @@ struct HLSPlayerScreen: View {
         _resumePositionState = State(initialValue: resumePosition)
     }
 
-    private var currentURL: URL { activePlayback?.url ?? url }
+    private var currentURL: URL {
+        if let activePlayback,
+           filteredPlaylistSourceURL == activePlayback.url,
+           let filteredPlaylistURL {
+            return filteredPlaylistURL
+        }
+        return activePlayback?.url ?? url
+    }
     private var currentTitle: String { activePlayback?.videoTitle ?? title ?? displayName }
     private var currentSubtitle: String {
         if let activePlayback { return "\(activePlayback.sourceName) · \(activePlayback.episodeName)" }
@@ -67,6 +74,9 @@ struct HLSPlayerScreen: View {
     @State private var playerItemStatus: AVPlayerItem.Status = .unknown
     @State private var isBuffering = true
     @State private var vlcStatusMessage: String? = "正在连接视频源…"
+    @State private var filteredPlaylistURL: URL?
+    @State private var filteredPlaylistSourceURL: URL?
+    @State private var isPreparingFilteredPlaylist = false
     @State private var vlcIsPlaying = true
     @State private var vlcSeekRequest: Double?
     @State private var player: AVPlayer?
@@ -118,7 +128,15 @@ struct HLSPlayerScreen: View {
             .clipped()
             .ignoresSafeArea()
 
-            if usesVLC, let vlcStatusMessage, playerErrorMessage == nil {
+            if isPreparingFilteredPlaylist {
+                VStack(spacing: 12) {
+                    ProgressView().tint(.white).scaleEffect(1.2)
+                    Text("正在检查播放列表广告片段…")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(18)
+                .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 14))
+            } else if usesVLC, let vlcStatusMessage, playerErrorMessage == nil {
                 VStack(spacing: 12) {
                     ProgressView().tint(.white).scaleEffect(1.2)
                     Text(vlcStatusMessage).font(.footnote).foregroundStyle(.white.opacity(0.85))
@@ -211,8 +229,11 @@ struct HLSPlayerScreen: View {
                 }
         )
         .onAppear {
-            if !usesVLC { configureAVPlayer() }
+            if !usesVLC { configureCurrentPlayback() }
             scheduleControlsHide()
+        }
+        .onChange(of: stripMarkedAds) { _ in
+            if activePlayback != nil { configureCurrentPlayback() }
         }
         .onChange(of: currentURL) { _ in
             playerErrorMessage = nil
@@ -232,7 +253,7 @@ struct HLSPlayerScreen: View {
                 itemObservation = nil
                 timeControlObservation = nil
             } else {
-                configureAVPlayer()
+                configureCurrentPlayback()
             }
         }
         .sheet(isPresented: $showingEpisodePicker) {
@@ -551,6 +572,53 @@ struct HLSPlayerScreen: View {
     }
 
     @MainActor
+    private func configureCurrentPlayback() {
+        if let activePlayback,
+           let filteredPlaylistURL,
+           filteredPlaylistSourceURL == activePlayback.url,
+           stripMarkedAds {
+            configureAVPlayer()
+            return
+        }
+
+        filteredPlaylistURL = nil
+        filteredPlaylistSourceURL = nil
+
+        guard stripMarkedAds,
+              let activePlayback,
+              activePlayback.url.pathExtension.lowercased() == "m3u8" else {
+            isPreparingFilteredPlaylist = false
+            configureAVPlayer()
+            return
+        }
+
+        isPreparingFilteredPlaylist = true
+        Task {
+            do {
+                let result = try await HLSPlaybackAdFilter.prepare(url: activePlayback.url, headers: headers)
+                await MainActor.run {
+                    guard self.activePlayback?.url == activePlayback.url else { return }
+                    if let result {
+                        filteredPlaylistURL = result.playlistURL
+                        filteredPlaylistSourceURL = activePlayback.url
+                        AppDiagnostics.shared.log("TVBOX", "播放前过滤广告分片：\(result.removedSegmentCount) 个")
+                    } else {
+                        AppDiagnostics.shared.log("TVBOX", "播放列表未检测到可安全过滤的广告分片")
+                    }
+                    isPreparingFilteredPlaylist = false
+                    configureAVPlayer()
+                }
+            } catch {
+                await MainActor.run {
+                    isPreparingFilteredPlaylist = false
+                    AppDiagnostics.shared.log("TVBOX", "广告过滤失败，回退原始播放列表：\(error.localizedDescription)")
+                    configureAVPlayer()
+                }
+            }
+        }
+    }
+
+    @MainActor
     private func configureAVPlayer() {
         guard !usesVLC else { return }
         itemObservation = nil
@@ -559,7 +627,11 @@ struct HLSPlayerScreen: View {
         playerItemStatus = .unknown
         isBuffering = true
         let asset: AVURLAsset
-        if let activePlayback {
+        if let activePlayback,
+           filteredPlaylistSourceURL == activePlayback.url,
+           let filteredPlaylistURL {
+            asset = AVURLAsset(url: filteredPlaylistURL, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+        } else if let activePlayback {
             asset = TVBoxPlaybackPreloader.shared.asset(for: activePlayback.url)
         } else if currentURL == url, let preloadedAsset {
             asset = preloadedAsset
