@@ -379,7 +379,7 @@ struct HLSPlayerScreen: View {
             }
             if canDownloadCurrent {
                 Menu {
-                    Toggle("跳过播放列表标记的广告", isOn: $stripMarkedAds)
+                    Toggle("跳过识别出的广告片段", isOn: $stripMarkedAds)
                 } label: {
                     Label("去广告", systemImage: "scissors")
                         .font(.system(size: 12, weight: .semibold))
@@ -586,6 +586,11 @@ struct HLSPlayerScreen: View {
             return
         }
 
+        if let oldPlaylist = filteredPlaylistURL {
+            player?.pause()
+            player?.replaceCurrentItem(with: nil)
+            try? FileManager.default.removeItem(at: oldPlaylist)
+        }
         filteredPlaylistURL = nil
         filteredPlaylistSourceURL = nil
 
@@ -647,7 +652,18 @@ struct HLSPlayerScreen: View {
         itemObservation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
             DispatchQueue.main.async {
                 playerItemStatus = observed.status
-                if observed.status == .failed {
+                if observed.status == .failed,
+                   let filteredPlaylistURL,
+                   let activePlayback,
+                   filteredPlaylistSourceURL == activePlayback.url {
+                    AppDiagnostics.shared.log("TVBOX", "过滤后播放列表无法播放，回退原始列表")
+                    try? FileManager.default.removeItem(at: filteredPlaylistURL)
+                    self.filteredPlaylistURL = nil
+                    filteredPlaylistSourceURL = nil
+                    playerErrorMessage = nil
+                    configureAVPlayer()
+                    return
+                } else if observed.status == .failed {
                     playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
                 } else if observed.status == .readyToPlay,
                           resumePositionState > 0,
