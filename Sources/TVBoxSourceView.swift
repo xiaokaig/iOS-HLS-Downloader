@@ -15,12 +15,16 @@ struct TVBoxSourceView: View {
     @State private var statusMessage = "首次使用请粘贴 TVBox JSON 源地址。"
     @State private var sourceHost = ""
 
-    let onPlay: (URL) -> Void
+    let onPlay: (TVBoxPlayback) -> Void
 
     private var sourceHistory: [TVBoxSourceHistoryEntry] {
-        guard let data = sourceHistoryJSON.data(using: .utf8),
-              let entries = try? JSONDecoder().decode([TVBoxSourceHistoryEntry].self, from: data) else { return [] }
-        return entries.sorted { $0.lastUsed > $1.lastUsed }
+        guard let data = sourceHistoryJSON.data(using: .utf8) else { return [] }
+        let decoder = JSONDecoder()
+        guard let entries = try? decoder.decode([TVBoxSourceHistoryEntry].self, from: data) else { return [] }
+        let sortedEntries = entries.sorted { first, second in
+            first.lastUsed > second.lastUsed
+        }
+        return sortedEntries
     }
 
     var body: some View {
