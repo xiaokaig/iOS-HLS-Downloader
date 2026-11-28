@@ -67,6 +67,8 @@ struct HLSPlayerScreen: View {
     @State private var playerItemStatus: AVPlayerItem.Status = .unknown
     @State private var isBuffering = true
     @State private var vlcStatusMessage: String? = "正在连接视频源…"
+    @State private var vlcIsPlaying = true
+    @State private var vlcSeekRequest: Double?
     @State private var player: AVPlayer?
     @State private var periodicTimeObserver: Any?
     @State private var resumeAppliedURL = ""
@@ -95,7 +97,7 @@ struct HLSPlayerScreen: View {
 
             Group {
                 if usesVLC {
-                    VLCPlayerView(url: currentURL, headers: headers, onStatusChange: { status in
+                    VLCPlayerView(url: currentURL, headers: headers, isPlaying: $vlcIsPlaying, seekRequest: $vlcSeekRequest, onStatusChange: { status in
                         vlcStatusMessage = status
                         if let status, status.hasPrefix("播放失败") { playerErrorMessage = status }
                     }, onProgressChange: { position, duration in
@@ -150,12 +152,15 @@ struct HLSPlayerScreen: View {
                 VStack(spacing: 0) {
                     header
                     Spacer(minLength: 20)
+                    if usesVLC {
+                        vlcPlaybackControls
+                    }
                     HStack(alignment: .bottom, spacing: 14) {
                         bottomActions
                         Spacer(minLength: 12)
                         sideControls
                     }
-                    Spacer(minLength: 20)
+                    Spacer(minLength: 8)
                 }
                 .padding(.horizontal, 22)
                 .padding(.top, 8)
@@ -212,6 +217,8 @@ struct HLSPlayerScreen: View {
         .onChange(of: currentURL) { _ in
             playerErrorMessage = nil
             vlcStatusMessage = "正在连接视频源…"
+            vlcIsPlaying = true
+            vlcSeekRequest = nil
             downloadFeedback = nil
             if usesVLC {
                 lastKnownPlaybackPosition = 0
@@ -281,6 +288,53 @@ struct HLSPlayerScreen: View {
             .padding(.top, -12)
             .allowsHitTesting(false)
         }
+    }
+
+    private var vlcPlaybackControls: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 12) {
+                Button {
+                    vlcIsPlaying.toggle()
+                    scheduleControlsHide()
+                } label: {
+                    Image(systemName: vlcIsPlaying ? "pause.fill" : "play.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .frame(width: 42, height: 42)
+                        .background(.black.opacity(0.52), in: Circle())
+                }
+                .accessibilityLabel(vlcIsPlaying ? "暂停" : "播放")
+                Slider(
+                    value: Binding(
+                        get: { min(lastKnownPlaybackPosition, max(1, lastKnownPlaybackDuration)) },
+                        set: { value in
+                            lastKnownPlaybackPosition = value
+                            vlcSeekRequest = value
+                        }
+                    ),
+                    in: 0...max(1, lastKnownPlaybackDuration)
+                )
+                .tint(.white)
+                Text("\(formattedPlaybackTime(lastKnownPlaybackPosition)) / \(formattedPlaybackTime(lastKnownPlaybackDuration))")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.white)
+                    .fixedSize()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.black.opacity(0.55), in: RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    private func formattedPlaybackTime(_ value: Double) -> String {
+        guard value.isFinite, value >= 0 else { return "00:00" }
+        let seconds = Int(value)
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let remainder = seconds % 60
+        return hours > 0
+            ? String(format: "%d:%02d:%02d", hours, minutes, remainder)
+            : String(format: "%02d:%02d", minutes, remainder)
     }
 
     private var bottomActions: some View {
