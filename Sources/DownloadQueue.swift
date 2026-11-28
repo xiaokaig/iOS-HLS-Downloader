@@ -102,6 +102,9 @@ final class DownloadQueueManager: ObservableObject {
     @discardableResult
     func enqueueHLS(_ url: URL, cookies: [HTTPCookie] = [], fileName: String? = nil, stripMarkedAds: Bool = true) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
+            if existing.state == .queued, let fileName, !fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                existing.kind = .hls(url, cookies, fileName, stripMarkedAds)
+            }
             return existing
         }
         let item = DownloadQueueItem(kind: .hls(url, cookies, fileName, stripMarkedAds))
@@ -113,6 +116,9 @@ final class DownloadQueueManager: ObservableObject {
     @discardableResult
     func enqueueDirect(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil, fileName: String? = nil) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
+            if existing.state == .queued, let fileName, !fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                existing.kind = .direct(url, cookies, referrer, fileName)
+            }
             return existing
         }
         let item = DownloadQueueItem(kind: .direct(url, cookies, referrer, fileName))

@@ -365,6 +365,31 @@ final class HLSDownloadManager: ObservableObject {
               videoDuration >= assetDuration * 0.90 else {
             throw NSError(domain: "HLSRemuxValidation", code: 2, userInfo: [NSLocalizedDescriptionKey: "视频轨道时长明显短于文件总时长（视频 \(Int(max(0, videoDuration))) 秒 / 文件 \(Int(max(0, assetDuration))) 秒）"])
         }
+        let reader = try AVAssetReader(asset: asset)
+        let output = AVAssetReaderTrackOutput(
+            track: videoTrack,
+            outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        )
+        output.alwaysCopiesSampleData = false
+        guard reader.canAdd(output) else {
+            throw NSError(domain: "HLSRemuxValidation", code: 3, userInfo: [NSLocalizedDescriptionKey: "无法建立视频解码读取器"])
+        }
+        reader.add(output)
+        guard reader.startReading() else {
+            throw reader.error ?? NSError(domain: "HLSRemuxValidation", code: 4, userInfo: [NSLocalizedDescriptionKey: "视频解码器无法启动"])
+        }
+        var decodedFrames = 0
+        while decodedFrames < 3, let sample = output.copyNextSampleBuffer() {
+            if let pixelBuffer = CMSampleBufferGetImageBuffer(sample),
+               CVPixelBufferGetWidth(pixelBuffer) > 0,
+               CVPixelBufferGetHeight(pixelBuffer) > 0 {
+                decodedFrames += 1
+            }
+        }
+        guard decodedFrames > 0 else {
+            let detail = reader.error?.localizedDescription ?? "未能解码出有效画面帧"
+            throw NSError(domain: "HLSRemuxValidation", code: 5, userInfo: [NSLocalizedDescriptionKey: "MP4 视频轨道存在但画面解码失败：\(detail)"])
+        }
     }
 
     private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> (text: String, finalURL: URL) {

@@ -49,20 +49,23 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
             CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            INFOPLIST_KEY_CFBundleVersion="$GITHUB_RUN_NUMBER" \
-            INFOPLIST_KEY_InternalGitCommit="${GITHUB_SHA:0:7}" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
-      - name: Verify compiled app icon
+      - name: Inject and verify build identity
         run: |
           APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/HLSDownloader.app"
+          PLIST="$APP_PATH/Info.plist"
           test -s "$APP_PATH/Assets.car"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP_PATH/Info.plist" | grep -qx 'AppIcon'
-          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist")"
-          echo "InternalGitCommit: $(/usr/libexec/PlistBuddy -c 'Print :InternalGitCommit' "$APP_PATH/Info.plist")"
-          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx "$GITHUB_RUN_NUMBER"
-          /usr/libexec/PlistBuddy -c 'Print :InternalGitCommit' "$APP_PATH/Info.plist" | grep -qx "${GITHUB_SHA:0:7}"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$PLIST" | grep -qx 'AppIcon'
+          # This target uses a custom Info.plist, so INFOPLIST_KEY_* is not merged.
+          # Inject metadata into the final built app before verification and packaging.
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $GITHUB_RUN_NUMBER" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $GITHUB_RUN_NUMBER" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Set :InternalGitCommit ${GITHUB_SHA:0:7}" "$PLIST" 2>/dev/null || /usr/libexec/PlistBuddy -c "Add :InternalGitCommit string ${GITHUB_SHA:0:7}" "$PLIST"
+          echo "CFBundleVersion: $(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST")"
+          echo "InternalGitCommit: $(/usr/libexec/PlistBuddy -c 'Print :InternalGitCommit' "$PLIST")"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$PLIST" | grep -qx "$GITHUB_RUN_NUMBER"
+          /usr/libexec/PlistBuddy -c 'Print :InternalGitCommit' "$PLIST" | grep -qx "${GITHUB_SHA:0:7}"
 
       - name: Package unsigned IPA
         run: |

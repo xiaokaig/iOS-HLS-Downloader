@@ -33,10 +33,20 @@ struct TVBoxSourceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
                 VStack(alignment: .leading, spacing: 13) {
-                    HStack {
-                        Label("当前影视源", systemImage: "dot.radiowaves.left.and.right")
-                            .font(.headline)
-                        Spacer()
+                    Label("当前影视源", systemImage: "dot.radiowaves.left.and.right")
+                        .font(.headline)
+
+                    Text("源地址")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    HStack(alignment: .center, spacing: 8) {
+                        TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress, axis: .vertical)
+                            .font(.system(.subheadline, design: .rounded))
+                            .keyboardType(.URL)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .textFieldStyle(.roundedBorder)
+                            .lineLimit(2...4)
                         Menu {
                             if sourceHistory.isEmpty {
                                 Text("暂无源历史")
@@ -65,24 +75,14 @@ struct TVBoxSourceView: View {
                                 }
                             }
                         } label: {
-                            Label("历史源", systemImage: "clock.arrow.circlepath")
-                                .font(.subheadline.weight(.semibold))
-                                .padding(.horizontal, 12).padding(.vertical, 9)
-                                .background(Color.accentColor.opacity(0.12), in: Capsule())
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.title3.weight(.semibold))
+                                .foregroundStyle(Color.accentColor)
+                                .frame(width: 42, height: 42)
+                                .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 10))
                         }
                         .accessibilityLabel("历史影视源")
                     }
-
-                    Text("源地址")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    TextField("粘贴 TVBox JSON 源地址", text: $sourceAddress, axis: .vertical)
-                        .font(.system(.subheadline, design: .rounded))
-                        .keyboardType(.URL)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(2...4)
 
                     Button {
                         Task { await importSource() }
@@ -108,6 +108,30 @@ struct TVBoxSourceView: View {
                 .padding(16)
                 .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18))
                 .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color.primary.opacity(0.06), lineWidth: 1))
+
+                HStack(spacing: 12) {
+                    Image(systemName: "externaldrive.badge.timemachine")
+                        .font(.title2).foregroundStyle(Color.accentColor)
+                        .frame(width: 42, height: 42)
+                        .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("解析缓存").font(.subheadline.weight(.semibold))
+                        Text(parsedSourceCacheJSON.isEmpty ? "暂无已保存的影视源解析缓存" : "已缓存当前影视源，可在此清理")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    if !parsedSourceCacheJSON.isEmpty {
+                        Button("清理", role: .destructive) {
+                            parsedSourceCacheJSON = ""
+                            parsedSource = nil
+                            sourceHost = ""
+                            statusMessage = "解析缓存已清理；源地址和源历史保留。"
+                        }
+                        .font(.subheadline.weight(.semibold))
+                    }
+                }
+                .padding(14)
+                .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
 
                 NavigationLink {
                     TVBoxPlaybackHistoryView { playback, position in
@@ -199,12 +223,16 @@ struct TVBoxSourceView: View {
         .navigationTitle("TVBox 影视源")
         .navigationBarTitleDisplayMode(.inline)
         .onAppear {
+            if sourceAddress.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+               let lastUsed = sourceHistory.first {
+                sourceAddress = lastUsed.url
+            }
             if parsedSource == nil, !parsedSourceCacheJSON.isEmpty,
                let data = parsedSourceCacheJSON.data(using: .utf8),
                let cached = try? JSONDecoder().decode(TVBoxParsedSource.self, from: data) {
                 parsedSource = cached
                 sourceHost = URL(string: sourceAddress)?.host ?? ""
-                statusMessage = "已恢复上次成功解析的影视源（\(cached.siteCount) 个站点）。"
+                statusMessage = "已自动恢复上次影视源：\(cached.title)（\(cached.siteCount) 个站点）。"
             }
         }
         .fullScreenCover(isPresented: Binding(
