@@ -619,11 +619,12 @@ struct HLSPlayerScreen: View {
                         filteredPlaylistURL = result.playlistURL
                         filteredPlaylistSourceURL = activePlayback.url
                         AppDiagnostics.shared.log("TVBOX", "播放前过滤广告分片：\(result.removedSegmentCount) 个")
+                        isPreparingFilteredPlaylist = false
                     } else {
                         AppDiagnostics.shared.log("TVBOX", "播放列表未检测到可安全过滤的广告分片")
+                        isPreparingFilteredPlaylist = false
+                        configureAVPlayer()
                     }
-                    isPreparingFilteredPlaylist = false
-                    configureAVPlayer()
                 }
             } catch {
                 await MainActor.run {
