@@ -114,8 +114,9 @@ enum HLSParser {
                     isAd: isAdBreak
                 ))
                 if let remaining = adBreakRemaining {
-                    adBreakRemaining = max(0, remaining - pendingDuration)
-                    if adBreakRemaining == 0 { isAdBreak = false; adBreakRemaining = nil }
+                    let nextRemaining = max(0, remaining - pendingDuration)
+                    adBreakRemaining = nextRemaining
+                    if nextRemaining <= 0 { isAdBreak = false; adBreakRemaining = nil }
                 }
                 nextSequence += 1
                 pendingDuration = 0
