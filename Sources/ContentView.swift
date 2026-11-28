@@ -350,7 +350,21 @@ struct ContentView: View {
                                         .buttonStyle(.plain)
                                         .onLongPressGesture { isEditingHomeShortcuts = true }
                                     }
-                                    if homeShortcuts.count < 8 || isEditingHomeShortcuts {
+                                    ForEach(0..<max(0, 8 - homeShortcuts.count), id: \.self) { _ in
+                                        Button {
+                                            editingHomeShortcut = BrowserShortcut(title: "", icon: "globe", url: "", isTVBox: false)
+                                        } label: {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: "plus")
+                                                    .font(.system(size: 21))
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(width: 54, height: 54)
+                                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
+                                                Text("添加").font(.caption).foregroundStyle(.secondary)
+                                            }.frame(maxWidth: .infinity)
+                                        }.buttonStyle(.plain)
+                                    }
+                                    if homeShortcuts.count >= 8 && isEditingHomeShortcuts {
                                         Button {
                                             editingHomeShortcut = BrowserShortcut(title: "", icon: "globe", url: "", isTVBox: false)
                                         } label: {
