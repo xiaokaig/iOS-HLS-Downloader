@@ -41,8 +41,8 @@ final class HLSDownloadManager: ObservableObject {
 
     func inspectPlaylist(_ url: URL, cookies: [HTTPCookie] = []) async throws -> HLSInspection {
         status = "解析播放列表…"
-        let text = try await fetchText(url, cookies: cookies)
-        let parsed = try HLSParser.parse(text, baseURL: url)
+        let fetched = try await fetchText(url, cookies: cookies)
+        let parsed = try HLSParser.parse(fetched.text, baseURL: fetched.finalURL)
         return HLSInspection(
             variants: parsed.variants,
             segmentCount: parsed.segments.count,
@@ -68,8 +68,8 @@ final class HLSDownloadManager: ObservableObject {
         var playlistURL = url
         var playlist: HLSPlaylist?
         for _ in 0..<4 {
-            let text = try await fetchText(playlistURL, cookies: cookies)
-            let parsed = try HLSParser.parse(text, baseURL: playlistURL)
+            let fetched = try await fetchText(playlistURL, cookies: cookies)
+            let parsed = try HLSParser.parse(fetched.text, baseURL: fetched.finalURL)
             if parsed.variants.isEmpty {
                 playlist = parsed
                 break
@@ -342,7 +342,7 @@ final class HLSDownloadManager: ObservableObject {
         }
     }
 
-    private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> String {
+    private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> (text: String, finalURL: URL) {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         applyCookies(cookies, for: url, to: &request)
@@ -350,7 +350,7 @@ final class HLSDownloadManager: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw HLSDownloadError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw HLSDownloadError.httpStatus(http.statusCode) }
         guard let text = String(data: data, encoding: .utf8) else { throw HLSDownloadError.invalidResponse }
-        return text
+        return (text, http.url ?? url)
     }
 
     private func fetchKey(_ key: HLSKey, cookies: [HTTPCookie]) async throws -> Data {
