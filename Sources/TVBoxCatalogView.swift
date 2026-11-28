@@ -254,7 +254,7 @@ struct TVBoxVideoDetailView: View {
                                     sourceName: source.name,
                                     episodeName: episode.name,
                                     url: url,
-                                    playSources: detail?.playSources ?? [],
+                                    playSources: detail.playSources,
                                     selectedSourceID: source.id,
                                     selectedEpisodeID: episode.id
                                 ))
