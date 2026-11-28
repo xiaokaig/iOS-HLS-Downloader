@@ -5,6 +5,8 @@ import VLCKit
 struct VLCPlayerView: UIViewRepresentable {
     let url: URL
     var headers: [String: String] = [:]
+    @Binding var isPlaying: Bool
+    @Binding var seekRequest: Double?
     var onStatusChange: (String?) -> Void = { _ in }
     var onProgressChange: (Double, Double) -> Void = { _, _ in }
     func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers, onStatusChange: onStatusChange, onProgressChange: onProgressChange) }
@@ -17,16 +19,28 @@ struct VLCPlayerView: UIViewRepresentable {
         context.coordinator.player.drawable = view
         context.coordinator.player.media = context.coordinator.makeMedia(url: url)
         context.coordinator.player.play()
+        context.coordinator.lastCommandedPlaying = true
         return view
     }
     func updateUIView(_ view: UIView, context: Context) {
-        guard context.coordinator.url != url else { return }
-        context.coordinator.player.stop()
-        context.coordinator.url = url
-        context.coordinator.didReportPlaybackStart = false
-        context.coordinator.lastReportedSecond = -10
-        context.coordinator.player.media = context.coordinator.makeMedia(url: url)
-        context.coordinator.player.play()
+        let coordinator = context.coordinator
+        if coordinator.url != url {
+            coordinator.player.stop()
+            coordinator.url = url
+            coordinator.didReportPlaybackStart = false
+            coordinator.lastReportedSecond = -10
+            coordinator.player.media = coordinator.makeMedia(url: url)
+            coordinator.player.play()
+            coordinator.lastCommandedPlaying = true
+        }
+        if coordinator.lastCommandedPlaying != isPlaying {
+            coordinator.lastCommandedPlaying = isPlaying
+            if isPlaying { coordinator.player.play() } else { coordinator.player.pause() }
+        }
+        if let target = seekRequest, coordinator.lastSeekRequest != target {
+            coordinator.lastSeekRequest = target
+            coordinator.player.time = VLCTime(int: Int32(max(0, min(target * 1000, Double(Int32.max)))))
+        }
     }
     static func dismantleUIView(_ view: UIView, coordinator: Coordinator) {
         coordinator.player.stop()
@@ -40,6 +54,8 @@ struct VLCPlayerView: UIViewRepresentable {
         let onProgressChange: (Double, Double) -> Void
         fileprivate var lastReportedSecond = -10.0
         fileprivate var didReportPlaybackStart = false
+        fileprivate var lastCommandedPlaying: Bool?
+        fileprivate var lastSeekRequest: Double?
         init(url: URL, headers: [String: String], onStatusChange: @escaping (String?) -> Void, onProgressChange: @escaping (Double, Double) -> Void) {
             self.url = url
             self.headers = headers
@@ -72,7 +88,7 @@ struct VLCPlayerView: UIViewRepresentable {
                 DispatchQueue.main.async { self.onStatusChange(nil) }
             }
 
-            guard position - lastReportedSecond >= 10 else { return }
+            guard position - lastReportedSecond >= 0.4 else { return }
             lastReportedSecond = position
             DispatchQueue.main.async { self.onProgressChange(position, duration.isFinite ? duration : 0) }
         }

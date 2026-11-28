@@ -129,7 +129,50 @@ enum HLSParser {
             return HLSPlaylist(variants: variants.sorted { $0.bandwidth > $1.bandwidth }, segments: [], mediaSequence: mediaSequence, isEndList: isEndList)
         }
         guard !segments.isEmpty else { throw HLSParserError.emptyPlaylist }
-        return HLSPlaylist(variants: [], segments: segments, mediaSequence: mediaSequence, isEndList: isEndList)
+        let markedSegments = markLikelyLeadingAdSegments(segments)
+        return HLSPlaylist(variants: [], segments: markedSegments, mediaSequence: mediaSequence, isEndList: isEndList)
+    }
+
+    private static func markLikelyLeadingAdSegments(_ segments: [HLSSegment]) -> [HLSSegment] {
+        let adTokens = ["advert", "/ad/", "/ads/", "preroll", "pre-roll", "vast", "commercial", "promo"]
+        let explicitlyMarked = segments.map { segment in
+            let address = segment.url.absoluteString.lowercased()
+            return segment.isAd || adTokens.contains(where: { address.contains($0) })
+        }
+
+        // Some providers put the pre-roll on a separate CDN and omit HLS ad
+        // markers. Only infer a leading ad block when one CDN serves at least
+        // 80% of the playlist and the alternate-CDN block is at the very start.
+        let hostCounts = Dictionary(grouping: segments, by: { $0.url.host?.lowercased() ?? "" })
+            .mapValues(\.count)
+        guard let dominantHost = hostCounts.max(by: { $0.value < $1.value })?.key,
+              !dominantHost.isEmpty,
+              Double(hostCounts[dominantHost] ?? 0) / Double(segments.count) >= 0.8,
+              segments.first?.url.host?.lowercased() != dominantHost else {
+            return segments.enumerated().map { index, segment in
+                HLSSegment(id: segment.id, sequence: segment.sequence, url: segment.url,
+                           duration: segment.duration, byteRange: segment.byteRange, key: segment.key,
+                           map: segment.map, startsDiscontinuity: segment.startsDiscontinuity,
+                           isAd: explicitlyMarked[index])
+            }
+        }
+
+        var leadingAlternateIndices = Set<Int>()
+        var leadingDuration = 0.0
+        for (index, segment) in segments.enumerated() {
+            if segment.url.host?.lowercased() == dominantHost { break }
+            guard segment.duration > 0, segment.duration <= 30 else { break }
+            leadingAlternateIndices.insert(index)
+            leadingDuration += segment.duration
+            if leadingDuration > 60 { leadingAlternateIndices.removeAll(); break }
+        }
+
+        return segments.enumerated().map { index, segment in
+            HLSSegment(id: segment.id, sequence: segment.sequence, url: segment.url,
+                       duration: segment.duration, byteRange: segment.byteRange, key: segment.key,
+                       map: segment.map, startsDiscontinuity: segment.startsDiscontinuity,
+                       isAd: explicitlyMarked[index] || leadingAlternateIndices.contains(index))
+        }
     }
 
     private static func attributes(_ source: String) -> [String: String] {

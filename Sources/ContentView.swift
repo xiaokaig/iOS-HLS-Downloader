@@ -1,7 +1,42 @@
 import SwiftUI
 import AVKit
+import AVFoundation
 import WebKit
 import UIKit
+
+private struct LocalVideoThumbnail: View {
+    let url: URL
+    @State private var image: UIImage?
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image).resizable().scaledToFill()
+            } else {
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(Color.blue.opacity(0.10))
+                    .overlay {
+                        Image(systemName: "film")
+                            .font(.title2)
+                            .foregroundStyle(.blue)
+                    }
+            }
+        }
+        .task(id: url) {
+            guard image == nil else { return }
+            let asset = AVURLAsset(url: url)
+            let generator = AVAssetImageGenerator(asset: asset)
+            generator.appliesPreferredTrackTransform = true
+            generator.maximumSize = CGSize(width: 240, height: 180)
+            do {
+                let frame = try await generator.image(at: CMTime(seconds: 1, preferredTimescale: 600))
+                image = UIImage(cgImage: frame.image)
+            } catch {
+                image = nil
+            }
+        }
+    }
+}
 
 private struct BrowserShortcut: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
@@ -133,6 +168,7 @@ struct ContentView: View {
     @AppStorage("alistTargetDirectory") private var alistTargetDirectory = "/"
     @AppStorage("alistChooseDirectoryOnUpload") private var alistChooseDirectoryOnUpload = false
     @State private var showingAListDirectoryPicker = false
+    @State private var returnToFilesAfterAListPicker = false
     @State private var alistDirectoryPath = "/"
     @State private var alistDirectories: [AListDirectory] = []
     @State private var isLoadingAListDirectories = false
@@ -169,11 +205,15 @@ struct ContentView: View {
     @State private var alistOTPCode = ""
     @State private var alistSettingsStatus = "尚未测试连接"
     @State private var isTestingAList = false
-    @State private var uploadedFileURLs = Set<String>()
+    @AppStorage("uploadedFileURLs.v1") private var uploadedFileURLsJSON = ""
+    @State private var renameTarget: URL?
+    @State private var renameText = ""
+    @State private var showingRename = false
 
     // Local files
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
+    @State private var localPlayingURL: URL?
     @State private var playingHeaders: [String: String] = [:]
     @State private var playingTitle: String?
     @State private var playingSubtitle: String?
@@ -449,7 +489,7 @@ struct ContentView: View {
                     .presentationDragIndicator(.visible)
             }
             .navigationDestination(isPresented: $showingTVBox) {
-                TVBoxSourceView(downloadQueue: downloadQueue)
+                TVBoxSourceView(downloadQueue: downloadQueue, onOpenDownloads: { showingDownloads = true }, onOpenFiles: { showingFiles = true })
             }
             .sheet(item: $editingHomeShortcut) { shortcut in
                 BrowserShortcutEditor(shortcut: shortcut) { updated in
@@ -1069,6 +1109,15 @@ struct ContentView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("下载管理")
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(isPresented: Binding(
+                get: { localPlayingURL != nil },
+                set: { if !$0 { localPlayingURL = nil } }
+            )) {
+                if let url = localPlayingURL {
+                    HLSPlayerScreen(url: url, onClose: { localPlayingURL = nil })
+                        .background(.black)
+                }
+            }
         }
     }
 
@@ -1080,11 +1129,9 @@ struct ContentView: View {
                         Image(systemName: "folder")
                             .font(.system(size: 44))
                             .foregroundStyle(.tertiary)
-                        Text("还没有下载文件")
-                            .font(.headline)
+                        Text("还没有下载文件").font(.headline)
                         Text("完成下载的视频会显示在这里。")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .font(.subheadline).foregroundStyle(.secondary)
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color(uiColor: .systemGroupedBackground))
@@ -1092,53 +1139,57 @@ struct ContentView: View {
                     List {
                         ForEach(localFiles, id: \.absoluteString) { url in
                             HStack(spacing: 12) {
-                                Image(systemName: "film")
-                                    .font(.title2)
-                                    .foregroundStyle(.blue)
-                                    .frame(width: 42, height: 42)
-                                    .background(Color.blue.opacity(0.10))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10))
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(url.lastPathComponent)
-                                        .font(.subheadline.weight(.medium))
-                                        .lineLimit(1)
-                                    Text("\(fileSize(url)) · \(formattedFileDate(url))")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                    if alistUploader.currentFilePath == url.path {
-                                        ProgressView(value: alistUploader.progress)
-                                        Text(alistUploader.status)
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    } else if uploadedFileURLs.contains(url.absoluteString) {
-                                        Label("已上传到 AList", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2).foregroundStyle(.green)
+                                Button { openPlayer(url) } label: {
+                                    HStack(spacing: 12) {
+                                        LocalVideoThumbnail(url: url)
+                                            .frame(width: 76, height: 58)
+                                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(url.deletingPathExtension().lastPathComponent)
+                                                .font(.subheadline.weight(.medium))
+                                                .lineLimit(1)
+                                            Text("\(fileSize(url)) · \(url.pathExtension.uppercased())")
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                            if alistUploader.currentFilePath == url.path {
+                                                ProgressView(value: alistUploader.progress)
+                                                Text(alistUploader.status).font(.caption2).foregroundStyle(.secondary)
+                                            } else if uploadedFileURLs.contains(url.absoluteString) {
+                                                Label("已上传到 AList", systemImage: "checkmark.circle.fill")
+                                                    .font(.caption2).foregroundStyle(.green)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     }
+                                    .contentShape(Rectangle())
                                 }
-                                Spacer()
-                                Button {
-                                    uploadToAList(url)
-                                } label: {
-                                    Image(systemName: alistUploader.currentFilePath == url.path ? "arrow.up.circle.fill" : "arrow.up.to.line")
-                                        .font(.title2)
+                                .buttonStyle(.plain)
+                                Spacer(minLength: 4)
+                                Button { uploadToAList(url) } label: {
+                                    Image(systemName: alistUploader.currentFilePath == url.path ? "icloud.and.arrow.up.fill" : "icloud.and.arrow.up")
+                                        .font(.title3)
+                                        .frame(width: 34, height: 42)
                                 }
                                 .buttonStyle(.plain)
                                 .disabled(alistUploader.isUploading)
-                                Button {
-                                    openPlayer(url)
-                                } label: {
-                                    Image(systemName: "play.circle")
-                                        .font(.title2)
-                                }
-                                .buttonStyle(.plain)
                                 ShareLink(item: url) {
                                     Image(systemName: "square.and.arrow.up")
                                         .font(.title3)
+                                        .frame(width: 34, height: 42)
                                 }
                                 .buttonStyle(.plain)
                             }
                             .padding(.vertical, 5)
+                            .contentShape(Rectangle())
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { deleteFile(url) } label: {
+                                    Label("删除", systemImage: "trash")
+                                }
+                                Button { beginRename(url) } label: {
+                                    Label("重命名", systemImage: "pencil")
+                                }.tint(.orange)
+                            }
                         }
-                        .onDelete(perform: deleteFiles)
                     }
                     .listStyle(.insetGrouped)
                     .refreshable { refreshFiles() }
@@ -1147,9 +1198,23 @@ struct ContentView: View {
             .navigationTitle("已下载")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(action: refreshFiles) {
-                        Image(systemName: "arrow.clockwise")
-                    }
+                    Button(action: refreshFiles) { Image(systemName: "arrow.clockwise") }
+                }
+            }
+            .alert("重命名文件", isPresented: $showingRename) {
+                TextField("文件名", text: $renameText)
+                Button("保存") { renameSelectedFile() }
+                Button("取消", role: .cancel) { renameTarget = nil }
+            } message: {
+                Text("文件扩展名会自动保留。")
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { localPlayingURL != nil },
+                set: { if !$0 { localPlayingURL = nil } }
+            )) {
+                if let url = localPlayingURL {
+                    HLSPlayerScreen(url: url, onClose: { localPlayingURL = nil })
+                        .background(.black)
                 }
             }
         }
@@ -1260,6 +1325,7 @@ struct ContentView: View {
                         .keyboardType(.numberPad)
                     Toggle("上传时选择目录", isOn: $alistChooseDirectoryOnUpload)
                     Button {
+                        returnToFilesAfterAListPicker = false
                         pendingAListUploadURL = nil
                         alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
                         showingAListDirectoryPicker = true
@@ -1557,6 +1623,12 @@ struct ContentView: View {
         preloadedAsset: AVURLAsset? = nil,
         downloadAction: (() -> Void)? = nil
     ) {
+        if url.isFileURL {
+            guard localPlayingURL == nil else { return }
+            localPlayingURL = url
+            AppDiagnostics.shared.log("PLAYER", "从本地文件管理器直接打开：\(url.lastPathComponent)")
+            return
+        }
         guard playingURL == nil else { return }
         var headers = HTTPCookie.requestHeaderFields(with: cookies)
         if let referrer { headers["Referer"] = referrer.absoluteString }
@@ -1620,7 +1692,15 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { showingAListDirectoryPicker = false; pendingAListUploadURL = nil }
+                    Button("取消") {
+                        let shouldReturnToFiles = returnToFilesAfterAListPicker
+                        returnToFilesAfterAListPicker = false
+                        showingAListDirectoryPicker = false
+                        pendingAListUploadURL = nil
+                        if shouldReturnToFiles {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showingFiles = true }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { loadAListDirectories() } label: { Image(systemName: "arrow.clockwise") }
@@ -1661,9 +1741,16 @@ struct ContentView: View {
     private func confirmAListDirectorySelection() {
         alistTargetDirectory = alistDirectoryPath.isEmpty ? "/" : alistDirectoryPath
         showingAListDirectoryPicker = false
+        let shouldReturnToFiles = returnToFilesAfterAListPicker
+        returnToFilesAfterAListPicker = false
         guard let fileURL = pendingAListUploadURL else { return }
         pendingAListUploadURL = nil
         performAListUpload(fileURL, targetDirectory: alistTargetDirectory)
+        if shouldReturnToFiles {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                showingFiles = true
+            }
+        }
     }
 
     private var effectiveAListPassword: String {
@@ -1708,6 +1795,7 @@ struct ContentView: View {
         }
 
         if alistChooseDirectoryOnUpload {
+            returnToFilesAfterAListPicker = true
             pendingAListUploadURL = fileURL
             alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
             alistDirectories = []
@@ -1715,6 +1803,16 @@ struct ContentView: View {
         } else {
             performAListUpload(fileURL, targetDirectory: alistTargetDirectory)
         }
+    }
+
+    private var uploadedFileURLs: Set<String> {
+        Set(uploadedFileURLsJSON.split(separator: "\n").map(String.init))
+    }
+
+    private func persistUploadedFile(_ url: URL) {
+        var values = uploadedFileURLs
+        values.insert(url.absoluteString)
+        uploadedFileURLsJSON = values.sorted().joined(separator: "\n")
     }
 
     private func performAListUpload(_ fileURL: URL, targetDirectory: String) {
@@ -1729,7 +1827,7 @@ struct ContentView: View {
                     otpCode: alistOTPCode,
                     targetDirectory: targetDirectory
                 )
-                uploadedFileURLs.insert(fileURL.absoluteString)
+                persistUploadedFile(fileURL)
             } catch {
                 errorMessage = "AList 上传失败：\(error.localizedDescription)"
             }
@@ -1971,9 +2069,55 @@ struct ContentView: View {
         )) ?? []
         localFiles = urls.filter { ["mp4", "ts", "m4v", "mov", "webm", "mkv", "avi"].contains($0.pathExtension.lowercased()) }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedDescending }
-        // The file manager lists files; download history is recorded only by
-        // completed queue tasks. Do not recreate a history row after the user removes it.
-        library.reconcileDownloadHistory(existingFileURLs: Set(localFiles.map(\.absoluteString)))
+        let existing = Set(localFiles.map(\.absoluteString))
+        library.reconcileDownloadHistory(existingFileURLs: existing)
+        let uploaded = uploadedFileURLs.intersection(existing)
+        if uploaded != uploadedFileURLs {
+            uploadedFileURLsJSON = uploaded.sorted().joined(separator: "\n")
+        }
+    }
+
+    private func beginRename(_ url: URL) {
+        renameTarget = url
+        renameText = url.deletingPathExtension().lastPathComponent
+        showingRename = true
+    }
+
+    private func renameSelectedFile() {
+        guard let source = renameTarget else { return }
+        let stem = renameText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !stem.isEmpty else { errorMessage = "文件名不能为空。"; return }
+        let safeStem = stem.replacingOccurrences(of: "/", with: "_")
+        let destination = source.deletingLastPathComponent()
+            .appendingPathComponent(safeStem)
+            .appendingPathExtension(source.pathExtension)
+        guard destination != source else { renameTarget = nil; return }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            errorMessage = "同名文件已存在，请换一个名称。"
+            return
+        }
+        do {
+            try FileManager.default.moveItem(at: source, to: destination)
+            if uploadedFileURLs.contains(source.absoluteString) {
+                var values = uploadedFileURLs
+                values.remove(source.absoluteString)
+                values.insert(destination.absoluteString)
+                uploadedFileURLsJSON = values.sorted().joined(separator: "\n")
+            }
+            if let entry = library.history.first(where: { $0.fileURL == source.absoluteString }) {
+                library.removeHistory(entry.id)
+                library.recordDownload(fileURL: destination, sourceURL: entry.sourceURL.flatMap { URL(string: $0) })
+            }
+            renameTarget = nil
+            refreshFiles()
+        } catch {
+            errorMessage = "重命名失败：\(error.localizedDescription)"
+        }
+    }
+
+    private func deleteFile(_ url: URL) {
+        guard let index = localFiles.firstIndex(of: url) else { return }
+        deleteFiles(at: IndexSet(integer: index))
     }
 
     private func fileSize(_ url: URL) -> String {
@@ -1984,7 +2128,7 @@ struct ContentView: View {
     }
 
     private func deleteFiles(at offsets: IndexSet) {
-        for index in offsets {
+        for index in offsets where localFiles.indices.contains(index) {
             let url = localFiles[index]
             try? FileManager.default.removeItem(at: url)
             if let entry = library.history.first(where: { $0.fileURL == url.absoluteString }) {
