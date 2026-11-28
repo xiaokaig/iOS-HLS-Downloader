@@ -50,7 +50,7 @@ struct TVBoxCatalogView: View {
                             TVBoxVideoDetailView(site: site, video: video, onPlay: onPlay)
                         } label: {
                             HStack(spacing: 12) {
-                                if let url = URL(string: video.imageURL), !video.imageURL.isEmpty {
+                                if let url = URL(string: video.imageURL, relativeTo: URL(string: site.api))?.absoluteURL, !video.imageURL.isEmpty {
                                     AsyncImage(url: url) { image in
                                         image.resizable().scaledToFill()
                                     } placeholder: {

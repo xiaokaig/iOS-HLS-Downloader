@@ -275,6 +275,12 @@ private final class TVBoxXMLVideoParser: NSObject, XMLParserDelegate {
         if currentKey != nil { text += string }
     }
 
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        if currentKey != nil, let value = String(data: CDATABlock, encoding: .utf8) {
+            text += value
+        }
+    }
+
     func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
         let key = elementName.lowercased()
         if key == "video", let current {
