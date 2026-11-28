@@ -170,6 +170,7 @@ struct ContentView: View {
     @AppStorage("alistTargetDirectory") private var alistTargetDirectory = "/"
     @AppStorage("alistChooseDirectoryOnUpload") private var alistChooseDirectoryOnUpload = false
     @State private var showingAListDirectoryPicker = false
+    @State private var returnToFilesAfterAListPicker = false
     @State private var alistDirectoryPath = "/"
     @State private var alistDirectories: [AListDirectory] = []
     @State private var isLoadingAListDirectories = false
@@ -1326,6 +1327,7 @@ struct ContentView: View {
                         .keyboardType(.numberPad)
                     Toggle("上传时选择目录", isOn: $alistChooseDirectoryOnUpload)
                     Button {
+                        returnToFilesAfterAListPicker = false
                         pendingAListUploadURL = nil
                         alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
                         showingAListDirectoryPicker = true
@@ -1733,9 +1735,16 @@ struct ContentView: View {
     private func confirmAListDirectorySelection() {
         alistTargetDirectory = alistDirectoryPath.isEmpty ? "/" : alistDirectoryPath
         showingAListDirectoryPicker = false
+        let shouldReturnToFiles = returnToFilesAfterAListPicker
+        returnToFilesAfterAListPicker = false
         guard let fileURL = pendingAListUploadURL else { return }
         pendingAListUploadURL = nil
         performAListUpload(fileURL, targetDirectory: alistTargetDirectory)
+        if shouldReturnToFiles {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                showingFiles = true
+            }
+        }
     }
 
     private var effectiveAListPassword: String {
@@ -1780,6 +1789,7 @@ struct ContentView: View {
         }
 
         if alistChooseDirectoryOnUpload {
+            returnToFilesAfterAListPicker = true
             pendingAListUploadURL = fileURL
             alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
             alistDirectories = []
