@@ -12,9 +12,9 @@ enum HLSPlaybackAdFilter {
         var playlistText = ""
         var parsed: HLSPlaylist?
 
-        for _ in 0..<4 {
+        for _ in 0..<3 {
             var request = URLRequest(url: playlistURL)
-            request.timeoutInterval = 20
+            request.timeoutInterval = 12
             request.setValue("application/vnd.apple.mpegurl, application/x-mpegURL, */*", forHTTPHeaderField: "Accept")
             for (name, value) in headers {
                 request.setValue(value, forHTTPHeaderField: name)
