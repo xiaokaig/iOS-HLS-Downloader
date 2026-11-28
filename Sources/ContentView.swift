@@ -3,6 +3,96 @@ import AVKit
 import WebKit
 import UIKit
 
+private struct BrowserShortcut: Identifiable, Codable, Equatable {
+    var id: UUID = UUID()
+    var title: String
+    var icon: String
+    var url: String
+    var isTVBox: Bool
+
+    static let defaults: [BrowserShortcut] = [
+        BrowserShortcut(title: "TVBox", icon: "play.tv", url: "", isTVBox: true),
+        BrowserShortcut(title: "百度", icon: "magnifyingglass", url: "https://www.baidu.com", isTVBox: false),
+        BrowserShortcut(title: "必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com", isTVBox: false),
+        BrowserShortcut(title: "GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com", isTVBox: false),
+        BrowserShortcut(title: "YouTube", icon: "play.rectangle", url: "https://www.youtube.com", isTVBox: false)
+    ]
+}
+
+private struct BrowserShortcutEditor: View {
+    @Environment(\.dismiss) private var dismiss
+    let shortcut: BrowserShortcut
+    let onSave: (BrowserShortcut) -> Void
+    let onDelete: (UUID) -> Void
+    @State private var title: String
+    @State private var url: String
+    @State private var icon: String
+    @State private var isTVBox: Bool
+
+    init(shortcut: BrowserShortcut, onSave: @escaping (BrowserShortcut) -> Void, onDelete: @escaping (UUID) -> Void) {
+        self.shortcut = shortcut
+        self.onSave = onSave
+        self.onDelete = onDelete
+        _title = State(initialValue: shortcut.title)
+        _url = State(initialValue: shortcut.url)
+        _icon = State(initialValue: shortcut.icon)
+        _isTVBox = State(initialValue: shortcut.isTVBox)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                TextField("名称", text: $title)
+                Picker("入口类型", selection: $isTVBox) {
+                    Text("网页").tag(false)
+                    Text("TVBox").tag(true)
+                }
+                if !isTVBox {
+                    TextField("网址", text: $url)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                    TextField("SF Symbols 图标名称", text: $icon)
+                        .textInputAutocapitalization(.never)
+                    Text("例如 globe、play.rectangle、star、house.fill")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            .navigationTitle("编辑快捷入口")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("保存") {
+                        let raw = url.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let normalized = raw.contains("://") ? raw : "https://" + raw
+                        let validURL = isTVBox || (URL(string: normalized).map {
+                            ["https", "http"].contains($0.scheme?.lowercased() ?? "") && $0.host != nil
+                        } ?? false)
+                        guard !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, validURL else { return }
+                        var updated = shortcut
+                        updated.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
+                        updated.icon = isTVBox ? "play.tv" : (icon.isEmpty ? "globe" : icon)
+                        updated.url = isTVBox ? "" : normalized
+                        updated.isTVBox = isTVBox
+                        onSave(updated)
+                        dismiss()
+                    }
+                    .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || (!isTVBox && url.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty))
+                }
+                ToolbarItem(placement: .bottomBar) {
+                    Button("删除此入口", role: .destructive) {
+                        onDelete(shortcut.id)
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct ContentView: View {
     @Environment(\.scenePhase) private var scenePhase
     @StateObject private var downloader = HLSDownloadManager()
@@ -51,6 +141,10 @@ struct ContentView: View {
     @State private var showingBrowserCandidates = false
     @State private var showingBrowsingHistory = false
     @State private var showingBookmarks = false
+    @AppStorage("browserHomeShortcuts") private var browserHomeShortcutsData = ""
+    @State private var isEditingHomeShortcuts = false
+    @State private var editingHomeShortcut: BrowserShortcut?
+    @State private var showingTVBox = false
 
     // Browser
     @State private var browserAddress = ""
@@ -87,21 +181,8 @@ struct ContentView: View {
     @State private var playingDownloadAction: (() -> Void)?
 
     var body: some View {
-        TabView {
-            browserTab
-                .tabItem {
-                    Label("浏览器", systemImage: "safari")
-                }
-
-            NavigationStack {
-                TVBoxSourceView(downloadQueue: downloadQueue)
-            }
-            .tabItem {
-                Label("TVBox", systemImage: "play.tv")
-            }
-        }
-        .tint(.blue)
-        .onAppear {
+        browserTab
+            .onAppear {
             refreshFiles()
             if alistPassword.isEmpty { alistPassword = AListCredentialStore.loadPassword() ?? "" }
             checkAdRulesAutoUpdate()
@@ -231,24 +312,68 @@ struct ContentView: View {
                     .id(tabManager.activeTabID.uuidString + browserController.webViewID.uuidString)
 
                     if browserController.isShowingStartPage {
-                        VStack(spacing: 22) {
-                            Spacer()
-                            VStack(spacing: 8) {
-                                Image(systemName: "safari").font(.system(size: 44, weight: .light)).foregroundStyle(.blue)
-                                Text("轻装上网").font(.title3.weight(.semibold))
-                                Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
-                            }
-                            VStack(spacing: 14) {
-                                HStack(spacing: 14) {
-                                    browserShortcut("百度", icon: "magnifyingglass", url: "https://www.baidu.com")
-                                    browserShortcut("必应", icon: "sparkle.magnifyingglass", url: "https://www.bing.com")
-                                    browserShortcut("GitHub", icon: "chevron.left.forwardslash.chevron.right", url: "https://github.com")
-                                    browserShortcut("YouTube", icon: "play.rectangle", url: "https://www.youtube.com")
+                        ScrollView {
+                            VStack(spacing: 24) {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "safari").font(.system(size: 44, weight: .light)).foregroundStyle(.blue)
+                                    Text("轻装上网").font(.title3.weight(.semibold))
+                                    Text("搜索，或输入网址开始浏览").font(.caption).foregroundStyle(.secondary)
+                                }
+                                HStack {
+                                    Text("快捷入口").font(.headline)
+                                    Spacer()
+                                    Button(isEditingHomeShortcuts ? "完成" : "编辑") {
+                                        isEditingHomeShortcuts.toggle()
+                                    }.font(.subheadline.weight(.medium))
+                                }
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 14), count: 4), spacing: 20) {
+                                    ForEach(homeShortcuts) { shortcut in
+                                        Button {
+                                            if isEditingHomeShortcuts {
+                                                editingHomeShortcut = shortcut
+                                            } else if shortcut.isTVBox {
+                                                showingTVBox = true
+                                            } else if let url = URL(string: shortcut.url) {
+                                                browserAddress = url.absoluteString
+                                                browserController.load(url)
+                                            }
+                                        } label: {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: shortcut.icon)
+                                                    .font(.system(size: 21))
+                                                    .foregroundStyle(.primary)
+                                                    .frame(width: 54, height: 54)
+                                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
+                                                Text(shortcut.title).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                            }.frame(maxWidth: .infinity)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .onLongPressGesture { isEditingHomeShortcuts = true }
+                                    }
+                                    if homeShortcuts.count < 8 || isEditingHomeShortcuts {
+                                        Button {
+                                            editingHomeShortcut = BrowserShortcut(title: "", icon: "globe", url: "", isTVBox: false)
+                                        } label: {
+                                            VStack(spacing: 8) {
+                                                Image(systemName: "plus")
+                                                    .font(.system(size: 21))
+                                                    .foregroundStyle(.secondary)
+                                                    .frame(width: 54, height: 54)
+                                                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
+                                                Text("添加").font(.caption).foregroundStyle(.secondary)
+                                            }.frame(maxWidth: .infinity)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }
+                                if isEditingHomeShortcuts {
+                                    Text("编辑模式：点击入口修改或删除，点击添加创建新入口。")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                             }
-                            Spacer()
+                            .padding(.horizontal, 20)
+                            .padding(.top, 38)
+                            .padding(.bottom, 28)
                         }
-                        .padding(.horizontal, 18)
                         .background(Color(uiColor: .systemBackground))
                     }
                 }
@@ -308,6 +433,22 @@ struct ContentView: View {
                 tabOverviewSheet
                     .presentationDetents([.medium, .large])
                     .presentationDragIndicator(.visible)
+            }
+            .navigationDestination(isPresented: $showingTVBox) {
+                TVBoxSourceView(downloadQueue: downloadQueue)
+            }
+            .sheet(item: $editingHomeShortcut) { shortcut in
+                BrowserShortcutEditor(shortcut: shortcut) { updated in
+                    var items = homeShortcuts
+                    if let index = items.firstIndex(where: { $0.id == updated.id }) {
+                        items[index] = updated
+                    } else {
+                        items.append(updated)
+                    }
+                    saveHomeShortcuts(items)
+                } onDelete: { id in
+                    saveHomeShortcuts(homeShortcuts.filter { $0.id != id })
+                }
             }
         }
     }
@@ -778,19 +919,17 @@ struct ContentView: View {
         .buttonStyle(.plain)
     }
 
-    private func browserShortcut(_ title: String, icon: String, url: String) -> some View {
-        Button {
-            browserAddress = url
-            if let target = URL(string: url) { browserController.load(target) }
-        } label: {
-            VStack(spacing: 8) {
-                Image(systemName: icon).font(.system(size: 21)).foregroundStyle(.primary)
-                    .frame(width: 54, height: 54)
-                    .background(Color(uiColor: .secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 17))
-                Text(title).font(.caption).foregroundStyle(.secondary)
-            }.frame(maxWidth: .infinity)
-        }
-        .buttonStyle(.plain)
+    private var homeShortcuts: [BrowserShortcut] {
+        guard let data = browserHomeShortcutsData.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([BrowserShortcut].self, from: data),
+              !decoded.isEmpty else { return BrowserShortcut.defaults }
+        return decoded
+    }
+
+    private func saveHomeShortcuts(_ shortcuts: [BrowserShortcut]) {
+        guard let data = try? JSONEncoder().encode(shortcuts),
+              let value = String(data: data, encoding: .utf8) else { return }
+        browserHomeShortcutsData = value
     }
 
     private var downloadsTab: some View {
