@@ -489,7 +489,7 @@ struct ContentView: View {
                     .presentationDragIndicator(.visible)
             }
             .navigationDestination(isPresented: $showingTVBox) {
-                TVBoxSourceView(downloadQueue: downloadQueue)
+                TVBoxSourceView(downloadQueue: downloadQueue, onOpenDownloads: { showingDownloads = true }, onOpenFiles: { showingFiles = true })
             }
             .sheet(item: $editingHomeShortcut) { shortcut in
                 BrowserShortcutEditor(shortcut: shortcut) { updated in
