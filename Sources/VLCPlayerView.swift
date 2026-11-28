@@ -23,6 +23,8 @@ struct VLCPlayerView: UIViewRepresentable {
         guard context.coordinator.url != url else { return }
         context.coordinator.player.stop()
         context.coordinator.url = url
+        context.coordinator.didReportPlaybackStart = false
+        context.coordinator.lastReportedSecond = -10
         context.coordinator.player.media = context.coordinator.makeMedia(url: url)
         context.coordinator.player.play()
     }
@@ -36,7 +38,8 @@ struct VLCPlayerView: UIViewRepresentable {
         var headers: [String: String]
         let onStatusChange: (String?) -> Void
         let onProgressChange: (Double, Double) -> Void
-        private var lastReportedSecond = -10.0
+        fileprivate var lastReportedSecond = -10.0
+        fileprivate var didReportPlaybackStart = false
         init(url: URL, headers: [String: String], onStatusChange: @escaping (String?) -> Void, onProgressChange: @escaping (Double, Double) -> Void) {
             self.url = url
             self.headers = headers
@@ -59,7 +62,17 @@ struct VLCPlayerView: UIViewRepresentable {
         func mediaPlayerTimeChanged(_ notification: Notification!) {
             let position = Double(player.time.intValue) / 1000
             let duration = Double(player.media?.length.intValue ?? 0) / 1000
-            guard position.isFinite, position >= 0, position - lastReportedSecond >= 10 else { return }
+            guard position.isFinite, position > 0 else { return }
+
+            // Some TS streams begin advancing while VLC remains in its buffering
+            // state. Use real playback progress as a fallback to dismiss the
+            // startup overlay instead of leaving it visible indefinitely.
+            if !didReportPlaybackStart {
+                didReportPlaybackStart = true
+                DispatchQueue.main.async { self.onStatusChange(nil) }
+            }
+
+            guard position - lastReportedSecond >= 10 else { return }
             lastReportedSecond = position
             DispatchQueue.main.async { self.onProgressChange(position, duration.isFinite ? duration : 0) }
         }
