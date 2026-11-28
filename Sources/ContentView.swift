@@ -1140,26 +1140,31 @@ struct ContentView: View {
                     List {
                         ForEach(localFiles, id: \.absoluteString) { url in
                             HStack(spacing: 12) {
-                                LocalVideoThumbnail(url: url)
-                                    .frame(width: 76, height: 58)
-                                    .clipShape(RoundedRectangle(cornerRadius: 9))
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(url.deletingPathExtension().lastPathComponent)
-                                        .font(.subheadline.weight(.medium))
-                                        .lineLimit(1)
-                                    Text("\(fileSize(url)) · \(url.pathExtension.uppercased())")
-                                        .font(.caption.weight(.medium))
-                                        .foregroundStyle(.secondary)
-                                    if alistUploader.currentFilePath == url.path {
-                                        ProgressView(value: alistUploader.progress)
-                                        Text(alistUploader.status).font(.caption2).foregroundStyle(.secondary)
-                                    } else if uploadedFileURLs.contains(url.absoluteString) {
-                                        Label("已上传到 AList", systemImage: "checkmark.circle.fill")
-                                            .font(.caption2).foregroundStyle(.green)
+                                Button { openPlayer(url) } label: {
+                                    HStack(spacing: 12) {
+                                        LocalVideoThumbnail(url: url)
+                                            .frame(width: 76, height: 58)
+                                            .clipShape(RoundedRectangle(cornerRadius: 9))
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(url.deletingPathExtension().lastPathComponent)
+                                                .font(.subheadline.weight(.medium))
+                                                .lineLimit(1)
+                                            Text("\(fileSize(url)) · \(url.pathExtension.uppercased())")
+                                                .font(.caption.weight(.medium))
+                                                .foregroundStyle(.secondary)
+                                            if alistUploader.currentFilePath == url.path {
+                                                ProgressView(value: alistUploader.progress)
+                                                Text(alistUploader.status).font(.caption2).foregroundStyle(.secondary)
+                                            } else if uploadedFileURLs.contains(url.absoluteString) {
+                                                Label("已上传到 AList", systemImage: "checkmark.circle.fill")
+                                                    .font(.caption2).foregroundStyle(.green)
+                                            }
+                                        }
+                                        .frame(maxWidth: .infinity, alignment: .leading)
                                     }
+                                    .contentShape(Rectangle())
                                 }
-                                .contentShape(Rectangle())
-                                .onTapGesture { openPlayer(url) }
+                                .buttonStyle(.plain)
                                 Spacer(minLength: 4)
                                 Button { uploadToAList(url) } label: {
                                     Image(systemName: alistUploader.currentFilePath == url.path ? "icloud.and.arrow.up.fill" : "icloud.and.arrow.up")
