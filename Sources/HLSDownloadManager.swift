@@ -188,6 +188,7 @@ final class HLSDownloadManager: ObservableObject {
 
         status = "后台按顺序组装视频…"
         var lastMap: HLSMap?
+        var discontinuityOffsets: [UInt64] = []
         for (index, segment) in downloadSegments.enumerated() {
             try Task.checkCancellation()
             if let map = segment.map, map != lastMap {
@@ -225,6 +226,9 @@ final class HLSDownloadManager: ObservableObject {
                 segmentKeyData = try await fetchKey(key, cookies: cookies)
                 segmentIV = key.iv ?? Self.sequenceIV(segment.sequence)
             }
+            if !hasMap, index > 0, segment.startsDiscontinuity {
+                discontinuityOffsets.append(output.offsetInFile)
+            }
             try await Task.detached(priority: .utility) {
                 if let segmentKeyData, let segmentIV {
                     let encrypted = try Self.readDownloadedBytes(item, range: segment.byteRange)
@@ -252,7 +256,7 @@ final class HLSDownloadManager: ObservableObject {
                 ? "检测到 HLS 时间线断点，正在尝试 MP4 转封装并加强校验…"
                 : "正在尝试 MP4 转封装…"
             do {
-                finalURL = try await remuxTransportStream(destination)
+                finalURL = try await remuxTransportStream(destination, discontinuityOffsets: discontinuityOffsets)
             } catch {
                 conversionWarning = "MP4 完整性验证/转换失败，已保留原始 TS 文件：\(error.localizedDescription)"
             }
@@ -336,18 +340,140 @@ final class HLSDownloadManager: ObservableObject {
         throw lastError
     }
 
-    private func remuxTransportStream(_ sourceURL: URL) async throws -> URL {
+    private func remuxTransportStream(_ sourceURL: URL, discontinuityOffsets: [UInt64]) async throws -> URL {
         let destination = sourceURL.deletingPathExtension().appendingPathExtension("mp4")
         try? FileManager.default.removeItem(at: destination)
         do {
-            let remuxer = VLCTSRemuxer()
-            let result = try await remuxer.remux(source: sourceURL, destination: destination)
-            try await Self.validateRemuxedVideo(result)
+            let boundaries = Array(Set(discontinuityOffsets)).sorted()
+            if boundaries.isEmpty {
+                let remuxer = VLCTSRemuxer()
+                let result = try await remuxer.remux(source: sourceURL, destination: destination)
+                try await Self.validateRemuxedVideo(result)
+                try? FileManager.default.removeItem(at: sourceURL)
+                return result
+            }
+
+            status = "检测到时间线断点，正在分段转封装…"
+            let temporaryDirectory = FileManager.default.temporaryDirectory
+                .appendingPathComponent("HLSRemux-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: temporaryDirectory, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: temporaryDirectory) }
+
+            let chunks = try Self.splitTransportStream(sourceURL, boundaries: boundaries, into: temporaryDirectory)
+            var chunkMP4s: [URL] = []
+            for (index, chunk) in chunks.enumerated() {
+                try Task.checkCancellation()
+                status = "分段转封装：\(index + 1)/\(chunks.count)"
+                let partMP4 = temporaryDirectory.appendingPathComponent("part-\(index + 1).mp4")
+                let remuxer = VLCTSRemuxer()
+                let converted = try await remuxer.remux(source: chunk, destination: partMP4)
+                try await Self.validateRemuxedVideo(converted)
+                chunkMP4s.append(converted)
+            }
+
+            status = "正在合并 MP4 时间线…"
+            try await Self.mergeMP4Segments(chunkMP4s, destination: destination)
+            try await Self.validateRemuxedVideo(destination)
             try? FileManager.default.removeItem(at: sourceURL)
-            return result
+            return destination
         } catch {
             try? FileManager.default.removeItem(at: destination)
             throw error
+        }
+    }
+
+    private static func splitTransportStream(_ sourceURL: URL, boundaries: [UInt64], into directory: URL) throws -> [URL] {
+        let size = (try FileManager.default.attributesOfItem(atPath: sourceURL.path)[.size] as? NSNumber)?.uint64Value ?? 0
+        let validBoundaries = boundaries.filter { $0 > 0 && $0 < size }
+        let offsets = [UInt64(0)] + validBoundaries + [size]
+        let input = try FileHandle(forReadingFrom: sourceURL)
+        defer { try? input.close() }
+        var chunks: [URL] = []
+
+        for index in 0..<(offsets.count - 1) {
+            let start = offsets[index]
+            var remaining = offsets[index + 1] - start
+            guard remaining > 0 else { continue }
+            let destination = directory.appendingPathComponent("part-\(index + 1).ts")
+            guard FileManager.default.createFile(atPath: destination.path, contents: nil) else {
+                throw HLSDownloadError.invalidResponse
+            }
+            let output = try FileHandle(forWritingTo: destination)
+            defer { try? output.close() }
+            try input.seek(toOffset: start)
+            while remaining > 0 {
+                let amount = Int(min(UInt64(1024 * 1024), remaining))
+                let data = try input.read(upToCount: amount) ?? Data()
+                guard !data.isEmpty else { throw HLSDownloadError.invalidRange }
+                try output.write(contentsOf: data)
+                remaining -= UInt64(data.count)
+            }
+            try output.synchronize()
+            chunks.append(destination)
+        }
+        guard chunks.count > 1 else { throw HLSDownloadError.invalidRange }
+        return chunks
+    }
+
+    private static func mergeMP4Segments(_ segments: [URL], destination: URL) async throws {
+        guard !segments.isEmpty else { throw HLSDownloadError.emptyDownload }
+        let composition = AVMutableComposition()
+        guard let videoCompositionTrack = composition.addMutableTrack(
+            withMediaType: .video,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else { throw HLSDownloadError.invalidResponse }
+        let audioCompositionTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        )
+        var cursor = CMTime.zero
+
+        for segmentURL in segments {
+            let asset = AVURLAsset(url: segmentURL)
+            let duration = try await asset.load(.duration)
+            let sourceVideoTracks = try await asset.loadTracks(withMediaType: .video)
+            guard let sourceVideoTrack = sourceVideoTracks.first else {
+                throw NSError(domain: "HLSRemux", code: 10, userInfo: [NSLocalizedDescriptionKey: "分段 MP4 缺少视频轨道"])
+            }
+            let videoRange = try await sourceVideoTrack.load(.timeRange)
+            try videoCompositionTrack.insertTimeRange(videoRange, of: sourceVideoTrack, at: cursor)
+
+            if let audioCompositionTrack {
+                let sourceAudioTracks = try await asset.loadTracks(withMediaType: .audio)
+                if let sourceAudioTrack = sourceAudioTracks.first {
+                    let audioRange = try await sourceAudioTrack.load(.timeRange)
+                    try audioCompositionTrack.insertTimeRange(audioRange, of: sourceAudioTrack, at: cursor)
+                }
+            }
+            cursor = CMTimeAdd(cursor, duration)
+        }
+
+        try? FileManager.default.removeItem(at: destination)
+        guard let exporter = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetPassthrough) else {
+            throw HLSDownloadError.invalidResponse
+        }
+        exporter.outputURL = destination
+        exporter.outputFileType = .mp4
+        exporter.shouldOptimizeForNetworkUse = true
+        try await withCheckedThrowingContinuation { continuation in
+            exporter.exportAsynchronously {
+                switch exporter.status {
+                case .completed:
+                    continuation.resume()
+                case .failed, .cancelled:
+                    continuation.resume(throwing: exporter.error ?? NSError(
+                        domain: "HLSRemux",
+                        code: 11,
+                        userInfo: [NSLocalizedDescriptionKey: "分段 MP4 合并失败"]
+                    ))
+                default:
+                    continuation.resume(throwing: NSError(
+                        domain: "HLSRemux",
+                        code: 12,
+                        userInfo: [NSLocalizedDescriptionKey: "MP4 合并未正常完成"]
+                    ))
+                }
+            }
         }
     }
 
