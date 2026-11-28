@@ -87,7 +87,19 @@ struct ContentView: View {
     @State private var playingDownloadAction: (() -> Void)?
 
     var body: some View {
-        browserTab
+        TabView {
+            browserTab
+                .tabItem {
+                    Label("浏览器", systemImage: "safari")
+                }
+
+            NavigationStack {
+                TVBoxSourceView(downloadQueue: downloadQueue)
+            }
+            .tabItem {
+                Label("TVBox", systemImage: "play.tv")
+            }
+        }
         .tint(.blue)
         .onAppear {
             refreshFiles()
@@ -392,13 +404,6 @@ struct ContentView: View {
     private var browserMenuSheet: some View {
         NavigationStack {
             List {
-                Section("影视源") {
-                    NavigationLink {
-                        TVBoxSourceView(downloadQueue: downloadQueue)
-                    } label: {
-                        Label("TVBox 源解析", systemImage: "play.tv")
-                    }
-                }
                 Section("下载器") {
                     ForEach(orderedMenuItems(browserMenuDownloadOrder, defaults: ["downloads", "files"]), id: \.self) { item in
                         browserMenuRow(item)
