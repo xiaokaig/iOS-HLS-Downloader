@@ -128,6 +128,15 @@ struct HLSPlayerScreen: View {
             .scaleEffect(fillScreen ? 1.12 : 1)
             .clipped()
             .ignoresSafeArea()
+            .simultaneousGesture(
+                TapGesture().onEnded {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        controlsVisible.toggle()
+                    }
+                    if controlsVisible { scheduleControlsHide() }
+                    else { hideControlsTask?.cancel() }
+                }
+            )
 
             if isPreparingFilteredPlaylist {
                 VStack(spacing: 12) {
@@ -201,15 +210,6 @@ struct HLSPlayerScreen: View {
         .offset(y: dragOffset)
         .statusBarHidden(false)
         .contentShape(Rectangle())
-        .simultaneousGesture(
-            TapGesture().onEnded {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    controlsVisible.toggle()
-                }
-                if controlsVisible { scheduleControlsHide() }
-                else { hideControlsTask?.cancel() }
-            }
-        )
         .simultaneousGesture(
             DragGesture(minimumDistance: 18)
                 .onChanged { value in
