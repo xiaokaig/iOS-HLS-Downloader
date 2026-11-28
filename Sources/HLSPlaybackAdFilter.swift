@@ -48,6 +48,7 @@ enum HLSPlaybackAdFilter {
             .filter { !$0.isEmpty }
 
         var output: [String] = []
+        let firstRetainedSequence = parsed.segments.first(where: { !$0.isAd })?.sequence ?? parsed.mediaSequence
         var pendingSegmentTags: [String] = []
         for line in lines {
             if line.hasPrefix("#EXTINF:") {
@@ -65,6 +66,8 @@ enum HLSPlaybackAdFilter {
                 pendingSegmentTags.append(line)
             } else if isAdDateRange(line) {
                 continue
+            } else if line.hasPrefix("#EXT-X-MEDIA-SEQUENCE:") {
+                output.append("#EXT-X-MEDIA-SEQUENCE:\(firstRetainedSequence)")
             } else {
                 output.append(rewriteURIAttributes(in: line, relativeTo: playlistURL))
             }
