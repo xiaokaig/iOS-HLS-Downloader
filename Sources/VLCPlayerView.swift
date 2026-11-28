@@ -6,7 +6,8 @@ struct VLCPlayerView: UIViewRepresentable {
     let url: URL
     var headers: [String: String] = [:]
     var onStatusChange: (String?) -> Void = { _ in }
-    func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers, onStatusChange: onStatusChange) }
+    var onProgressChange: (Double, Double) -> Void = { _, _ in }
+    func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers, onStatusChange: onStatusChange, onProgressChange: onProgressChange) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         let audioSession = AVAudioSession.sharedInstance()
@@ -34,10 +35,13 @@ struct VLCPlayerView: UIViewRepresentable {
         var url: URL
         var headers: [String: String]
         let onStatusChange: (String?) -> Void
-        init(url: URL, headers: [String: String], onStatusChange: @escaping (String?) -> Void) {
+        let onProgressChange: (Double, Double) -> Void
+        private var lastReportedSecond = -10.0
+        init(url: URL, headers: [String: String], onStatusChange: @escaping (String?) -> Void, onProgressChange: @escaping (Double, Double) -> Void) {
             self.url = url
             self.headers = headers
             self.onStatusChange = onStatusChange
+            self.onProgressChange = onProgressChange
         }
         func mediaPlayerStateChanged(_ notification: Notification!) {
             let currentState = player.state
@@ -51,6 +55,13 @@ struct VLCPlayerView: UIViewRepresentable {
             default: message = "正在加载视频源…"
             }
             DispatchQueue.main.async { self.onStatusChange(message) }
+        }
+        func mediaPlayerTimeChanged(_ notification: Notification!) {
+            let position = Double(player.time.intValue) / 1000
+            let duration = Double(player.media.length.intValue) / 1000
+            guard position.isFinite, position >= 0, position - lastReportedSecond >= 10 else { return }
+            lastReportedSecond = position
+            DispatchQueue.main.async { self.onProgressChange(position, duration.isFinite ? duration : 0) }
         }
         func makeMedia(url: URL) -> VLCMedia {
             let media = VLCMedia(url: url)
