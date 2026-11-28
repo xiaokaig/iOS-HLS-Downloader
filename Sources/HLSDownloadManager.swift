@@ -247,15 +247,14 @@ final class HLSDownloadManager: ObservableObject {
 
         var finalURL = destination
         if !hasMap {
-            if mediaPlaylist.segments.contains(where: \.startsDiscontinuity) {
-                conversionWarning = "检测到 HLS 时间线断点（EXT-X-DISCONTINUITY），已跳过 MP4 转封装并保留原始 TS，避免转换时丢失后续画面。"
-            } else {
-                status = "正在尝试 MP4 转封装…"
-                do {
-                    finalURL = try await remuxTransportStream(destination)
-                } catch {
-                    conversionWarning = "MP4 完整性验证/转换失败，已保留原始 TS 文件：\(error.localizedDescription)"
-                }
+            let hasDiscontinuity = mediaPlaylist.segments.contains(where: \.startsDiscontinuity)
+            status = hasDiscontinuity
+                ? "检测到 HLS 时间线断点，正在尝试 MP4 转封装并加强校验…"
+                : "正在尝试 MP4 转封装…"
+            do {
+                finalURL = try await remuxTransportStream(destination)
+            } catch {
+                conversionWarning = "MP4 完整性验证/转换失败，已保留原始 TS 文件：\(error.localizedDescription)"
             }
         }
         outputURL = finalURL
@@ -379,7 +378,7 @@ final class HLSDownloadManager: ObservableObject {
             throw reader.error ?? NSError(domain: "HLSRemuxValidation", code: 4, userInfo: [NSLocalizedDescriptionKey: "视频解码器无法启动"])
         }
         var decodedFrames = 0
-        while decodedFrames < 3, let sample = output.copyNextSampleBuffer() {
+        while let sample = output.copyNextSampleBuffer() {
             if let pixelBuffer = CMSampleBufferGetImageBuffer(sample),
                CVPixelBufferGetWidth(pixelBuffer) > 0,
                CVPixelBufferGetHeight(pixelBuffer) > 0 {
@@ -389,6 +388,9 @@ final class HLSDownloadManager: ObservableObject {
         guard decodedFrames > 0 else {
             let detail = reader.error?.localizedDescription ?? "未能解码出有效画面帧"
             throw NSError(domain: "HLSRemuxValidation", code: 5, userInfo: [NSLocalizedDescriptionKey: "MP4 视频轨道存在但画面解码失败：\(detail)"])
+        }
+        if reader.status == .failed {
+            throw reader.error ?? NSError(domain: "HLSRemuxValidation", code: 6, userInfo: [NSLocalizedDescriptionKey: "MP4 全片解码校验失败"])
         }
     }
 
