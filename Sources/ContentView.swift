@@ -361,7 +361,16 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("影视源") {
-                    NavigationLink { TVBoxSourceView(onPlay: { openPlayer($0) }) } label: {
+                    NavigationLink {
+                        TVBoxSourceView(onPlay: { url in
+                            // Dismiss the browser-menu sheet before presenting the root full-screen player.
+                            // Presenting both at once can defer the player until the user backs out of TVBox.
+                            showingBrowserMenu = false
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                                openPlayer(url)
+                            }
+                        })
+                    } label: {
                         Label("TVBox 源解析", systemImage: "play.tv")
                     }
                 }

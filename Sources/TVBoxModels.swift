@@ -37,6 +37,11 @@ struct TVBoxParsedSource {
     let spiderReference: String?
 }
 
+struct TVBoxCategory: Identifiable, Hashable {
+    let id: String
+    let name: String
+}
+
 struct TVBoxVideo: Identifiable, Hashable {
     let id: String
     let name: String
@@ -139,6 +144,21 @@ enum TVBoxSourceParser {
 }
 
 enum TVBoxAPIClient {
+    struct CatalogResult {
+        let categories: [TVBoxCategory]
+        let videos: [TVBoxVideo]
+    }
+
+    static func catalog(site: TVBoxSite, categoryID: String?, page: Int = 1) async throws -> CatalogResult {
+        guard site.type == 0 || site.type == 1 else { throw TVBoxSourceError.unsupportedSite }
+        var parameters: [(String, String)] = [("ac", "list"), ("pg", String(max(1, page)))]
+        if let categoryID, !categoryID.isEmpty { parameters.append(("t", categoryID)) }
+        let data = try await request(site: site, parameters: parameters)
+        let categories = decodeCategories(data)
+        let videos = (try? decodeVideos(data)) ?? []
+        return CatalogResult(categories: categories, videos: videos)
+    }
+
     static func search(site: TVBoxSite, keyword: String, page: Int = 1) async throws -> [TVBoxVideo] {
         guard site.type == 0 || site.type == 1 else { throw TVBoxSourceError.unsupportedSite }
         let term = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -179,7 +199,7 @@ enum TVBoxAPIClient {
         components.queryItems = retained + parameters.map { URLQueryItem(name: $0.0, value: $0.1) }
         guard let url = components.url else { throw TVBoxSourceError.invalidURL }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 25
+        request.timeoutInterval = 20
         request.setValue("application/json, text/xml, application/xml, */*", forHTTPHeaderField: "Accept")
         request.setValue("HLSDownloader/1.0", forHTTPHeaderField: "User-Agent")
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -187,6 +207,18 @@ enum TVBoxAPIClient {
         guard (200..<300).contains(http.statusCode) else { throw TVBoxSourceError.httpStatus(http.statusCode) }
         guard data.count <= 10 * 1024 * 1024 else { throw TVBoxSourceError.responseTooLarge }
         return data
+    }
+
+    private static func decodeCategories(_ data: Data) -> [TVBoxCategory] {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return [] }
+        let dataObject = root["data"] as? [String: Any]
+        let raw = (root["class"] as? [[String: Any]]) ?? (dataObject?["class"] as? [[String: Any]]) ?? []
+        return raw.enumerated().compactMap { index, item in
+            let id = stringValue(item["type_id"] ?? item["id"] ?? item["typeId"])
+            let name = stringValue(item["type_name"] ?? item["name"] ?? item["typeName"])
+            guard !name.isEmpty else { return nil }
+            return TVBoxCategory(id: id.isEmpty ? String(index + 1) : id, name: name)
+        }
     }
 
     private static func decodeVideos(_ data: Data) throws -> [TVBoxVideo] {
@@ -239,7 +271,8 @@ enum TVBoxAPIClient {
         return ""
     }
 
-    private static func stringValue(_ value: Any) -> String {
+    private static func stringValue(_ value: Any?) -> String {
+        guard let value else { return "" }
         if let value = value as? String { return value }
         if let value = value as? NSNumber { return value.stringValue }
         return ""
