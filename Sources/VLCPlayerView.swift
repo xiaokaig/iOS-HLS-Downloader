@@ -58,7 +58,7 @@ struct VLCPlayerView: UIViewRepresentable {
         }
         func mediaPlayerTimeChanged(_ notification: Notification!) {
             let position = Double(player.time.intValue) / 1000
-            let duration = Double(player.media.length.intValue) / 1000
+            let duration = Double(player.media?.length.intValue ?? 0) / 1000
             guard position.isFinite, position >= 0, position - lastReportedSecond >= 10 else { return }
             lastReportedSecond = position
             DispatchQueue.main.async { self.onProgressChange(position, duration.isFinite ? duration : 0) }
