@@ -250,6 +250,8 @@ final class HLSDownloadManager: ObservableObject {
         try? FileManager.default.removeItem(at: taskDirectory)
         if finalURL.pathExtension.lowercased() == "mp4" {
             status = "下载完成（MP4）"
+        } else if conversionWarning?.contains("时间线断点") == true {
+            status = "下载完成（TS，保留原始时间线）"
         } else if conversionWarning != nil {
             status = "下载完成（TS，MP4 转换失败）"
         } else {
