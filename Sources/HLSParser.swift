@@ -78,7 +78,7 @@ enum HLSParser {
             } else if line.hasPrefix("#EXT-X-DATERANGE:") {
                 let attrs = attributes(String(line.dropFirst("#EXT-X-DATERANGE:".count)))
                 let marker = ((attrs["CLASS"] ?? "") + " " + (attrs["SCTE35-OUT"] ?? "")).lowercased()
-                if marker.contains("ad") || attrs["SCTE35-OUT"] != nil {
+                if marker.contains("ad") || marker.contains("interstitial") || marker.contains("splice") || attrs["SCTE35-OUT"] != nil {
                     isAdBreak = true
                     adBreakRemaining = Double(attrs["DURATION"] ?? "")
                 }
