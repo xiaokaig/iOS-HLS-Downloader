@@ -48,6 +48,8 @@ jobs:
             -sdk iphoneos \
             -destination 'generic/platform=iOS' \
             -derivedDataPath build/DerivedData \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            INFOPLIST_KEY_InternalGitCommit="${GITHUB_SHA:0:7}" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
@@ -56,6 +58,8 @@ jobs:
           APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/HLSDownloader.app"
           test -s "$APP_PATH/Assets.car"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIconName' "$APP_PATH/Info.plist" | grep -qx 'AppIcon'
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_PATH/Info.plist" | grep -qx "$GITHUB_RUN_NUMBER"
+          /usr/libexec/PlistBuddy -c 'Print :InternalGitCommit' "$APP_PATH/Info.plist" | grep -qx "${GITHUB_SHA:0:7}"
 
       - name: Package unsigned IPA
         run: |

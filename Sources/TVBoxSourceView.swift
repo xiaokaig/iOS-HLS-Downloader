@@ -188,6 +188,9 @@ struct TVBoxSourceView: View {
                         }
                     }
                 }
+                BuildIdentityBadge()
+                    .frame(maxWidth: .infinity)
+                    .padding(.top, 8)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)

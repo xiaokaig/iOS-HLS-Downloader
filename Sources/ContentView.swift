@@ -612,8 +612,16 @@ struct ContentView: View {
                     NavigationLink { settingsTab } label: { Label("设置", systemImage: "gearshape") }
                 }
                 Section("关于") {
-                    LabeledContent("版本", value: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0")
+                    LabeledContent("应用版本", value: BuildIdentity.appVersion)
+                    LabeledContent("内部版本", value: BuildIdentity.internalVersion)
+                    LabeledContent("构建编号", value: BuildIdentity.buildNumber)
+                    LabeledContent("Git Commit", value: BuildIdentity.commit)
                     LabeledContent("浏览器内核", value: "WKWebView")
+                    Button {
+                        BuildIdentity.copyToPasteboard()
+                    } label: {
+                        Label("复制完整构建信息", systemImage: "doc.on.doc")
+                    }
                 }
             }
             .navigationTitle("更多")
