@@ -4,7 +4,7 @@ import AVFoundation
 import WebKit
 import UIKit
 
-
+private struct LocalVideoThumbnail: View {
     let url: URL
     @State private var image: UIImage?
 
@@ -37,6 +37,7 @@ import UIKit
         }
     }
 }
+
 private struct BrowserShortcut: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var title: String
