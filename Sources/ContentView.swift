@@ -1,7 +1,10 @@
 import SwiftUI
+import AVKit
 import AVFoundation
+import WebKit
+import UIKit
 
-private struct LocalVideoThumbnail: View {
+
     let url: URL
     @State private var image: UIImage?
 
@@ -34,12 +37,6 @@ private struct LocalVideoThumbnail: View {
         }
     }
 }
-
-import SwiftUI
-import AVKit
-import WebKit
-import UIKit
-
 private struct BrowserShortcut: Identifiable, Codable, Equatable {
     var id: UUID = UUID()
     var title: String
@@ -2100,7 +2097,7 @@ struct ContentView: View {
             }
             if let entry = library.history.first(where: { $0.fileURL == source.absoluteString }) {
                 library.removeHistory(entry.id)
-                library.recordDownload(fileURL: destination, sourceURL: entry.sourceURL.flatMap(URL.init(string:)))
+                library.recordDownload(fileURL: destination, sourceURL: entry.sourceURL.flatMap { URL(string: $0) })
             }
             renameTarget = nil
             refreshFiles()
