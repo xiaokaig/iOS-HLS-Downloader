@@ -628,6 +628,7 @@ struct HLSPlayerScreen: View {
                 }
             } catch {
                 await MainActor.run {
+                    guard self.activePlayback?.url == activePlayback.url else { return }
                     isPreparingFilteredPlaylist = false
                     adFilterFailedSourceURL = activePlayback.url
                     AppDiagnostics.shared.log("TVBOX", "广告过滤失败，回退原始播放列表：\(error.localizedDescription)")
