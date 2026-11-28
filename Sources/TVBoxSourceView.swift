@@ -83,7 +83,7 @@ struct TVBoxSourceView: View {
             }
 
             if let parsedSource {
-                Section("当前源：\(parsedSource.title)") {
+                Section {
                     LabeledContent("站点数量", value: "\(parsedSource.siteCount)")
                     LabeledContent("解析器", value: "\(parsedSource.parseCount)")
                     LabeledContent("直播配置", value: "\(parsedSource.liveCount)")
@@ -91,6 +91,8 @@ struct TVBoxSourceView: View {
                         LabeledContent("Spider 依赖", value: spider)
                     }
                     if !sourceHost.isEmpty { LabeledContent("来源主机", value: sourceHost) }
+                } header: {
+                    Text("当前源：\(parsedSource.title)")
                 } footer: {
                     Text("标准 XML/JSON CMS 支持分类片单、搜索、详情和直链播放。Spider、扩展 API、直播及解析器暂不执行。")
                 }

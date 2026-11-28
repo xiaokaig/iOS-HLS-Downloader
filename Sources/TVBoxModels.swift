@@ -1,4 +1,5 @@
 import Foundation
+import AVFoundation
 
 struct TVBoxSite: Identifiable, Hashable {
     let id: String
@@ -60,6 +61,48 @@ struct TVBoxPlaySource: Identifiable, Hashable {
     let id: String
     let name: String
     let episodes: [TVBoxEpisode]
+}
+
+struct TVBoxPlayback {
+    let videoTitle: String
+    let sourceName: String
+    let episodeName: String
+    let url: URL
+}
+
+@MainActor
+final class TVBoxPlaybackPreloader {
+    static let shared = TVBoxPlaybackPreloader()
+    private var assets: [String: AVURLAsset] = [:]
+    private var preloadTasks: [String: Task<Void, Never>] = [:]
+
+    func asset(for url: URL) -> AVURLAsset {
+        let key = url.absoluteString
+        if let cached = assets[key] { return cached }
+        let asset = AVURLAsset(url: url)
+        assets[key] = asset
+        if assets.count > 12, let oldest = assets.keys.first(where: { $0 != key }) {
+            assets.removeValue(forKey: oldest)
+            preloadTasks.removeValue(forKey: oldest)?.cancel()
+        }
+        return asset
+    }
+
+    func preload(_ url: URL) {
+        guard !url.isFileURL else { return }
+        let key = url.absoluteString
+        guard preloadTasks[key] == nil else { return }
+        let asset = asset(for: url)
+        preloadTasks[key] = Task {
+            do {
+                _ = try await asset.load(.isPlayable)
+                AppDiagnostics.shared.log("TVBOX", "播放预加载完成 url=\(AppDiagnostics.safeURL(url))")
+            } catch {
+                AppDiagnostics.shared.log("TVBOX", "播放预加载未完成 url=\(AppDiagnostics.safeURL(url)) error=\(error.localizedDescription)")
+            }
+            preloadTasks[key] = nil
+        }
+    }
 }
 
 struct TVBoxVideoDetail {

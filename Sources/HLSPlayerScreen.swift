@@ -5,12 +5,19 @@ import UIKit
 struct HLSPlayerScreen: View {
     let url: URL
     var headers: [String: String] = [:]
+    var title: String? = nil
+    var subtitle: String? = nil
+    var preloadedAsset: AVURLAsset? = nil
     let onClose: () -> Void
 
     @State private var fillScreen = false
     @State private var orientationMode: PlayerOrientationMode = .automatic
     @State private var playerErrorMessage: String?
     @State private var itemObservation: NSKeyValueObservation?
+    @State private var timeControlObservation: NSKeyValueObservation?
+    @State private var playerItemStatus: AVPlayerItem.Status = .unknown
+    @State private var isBuffering = true
+    @State private var vlcStatusMessage: String? = "正在连接视频源…"
     @State private var player: AVPlayer?
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
@@ -22,6 +29,7 @@ struct HLSPlayerScreen: View {
     }
 
     private var displayName: String {
+        if let title, !title.isEmpty { return title }
         let name = url.deletingPathExtension().lastPathComponent
         return name.isEmpty ? "正在播放" : name
     }
@@ -32,7 +40,10 @@ struct HLSPlayerScreen: View {
 
             Group {
                 if usesVLC {
-                    VLCPlayerView(url: url, headers: headers)
+                    VLCPlayerView(url: url, headers: headers, onStatusChange: { status in
+                        vlcStatusMessage = status
+                        if let status, status.hasPrefix("播放失败") { playerErrorMessage = status }
+                    })
                 } else {
                     VideoPlayer(player: player)
                 }
@@ -41,6 +52,23 @@ struct HLSPlayerScreen: View {
             .scaleEffect(fillScreen ? 1.12 : 1)
             .clipped()
             .ignoresSafeArea()
+
+            if usesVLC, let vlcStatusMessage, playerErrorMessage == nil {
+                VStack(spacing: 12) {
+                    ProgressView().tint(.white).scaleEffect(1.2)
+                    Text(vlcStatusMessage).font(.footnote).foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(18)
+                .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 14))
+            } else if !usesVLC, playerErrorMessage == nil && (playerItemStatus != .readyToPlay || isBuffering) {
+                VStack(spacing: 12) {
+                    ProgressView().tint(.white).scaleEffect(1.2)
+                    Text(playerItemStatus == .readyToPlay ? "正在缓冲视频…" : "正在加载视频源…")
+                        .font(.footnote).foregroundStyle(.white.opacity(0.85))
+                }
+                .padding(18)
+                .background(.black.opacity(0.48), in: RoundedRectangle(cornerRadius: 14))
+            }
 
             if let playerErrorMessage {
                 VStack {
@@ -104,15 +132,22 @@ struct HLSPlayerScreen: View {
         )
         .onAppear {
             if !usesVLC {
-                let asset = AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
+                let asset = preloadedAsset ?? AVURLAsset(url: url, options: headers.isEmpty ? nil : ["AVURLAssetHTTPHeaderFieldsKey": headers])
                 let item = AVPlayerItem(asset: asset)
-                itemObservation = item.observe(\.status, options: [.new]) { observed, _ in
-                    guard observed.status == .failed else { return }
+                itemObservation = item.observe(\.status, options: [.initial, .new]) { observed, _ in
                     DispatchQueue.main.async {
-                        playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
+                        playerItemStatus = observed.status
+                        if observed.status == .failed {
+                            playerErrorMessage = observed.error?.localizedDescription ?? "视频资源加载失败，请检查链接、Cookie 或 Referer。"
+                        }
                     }
                 }
                 let newPlayer = AVPlayer(playerItem: item)
+                timeControlObservation = newPlayer.observe(\.timeControlStatus, options: [.initial, .new]) { observed, _ in
+                    DispatchQueue.main.async {
+                        isBuffering = observed.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                    }
+                }
                 newPlayer.allowsExternalPlayback = true
                 player = newPlayer
                 newPlayer.play()
@@ -122,6 +157,7 @@ struct HLSPlayerScreen: View {
         .onDisappear {
             requestOrientation(.automatic)
             itemObservation = nil
+            timeControlObservation = nil
             hideControlsTask?.cancel()
             player?.pause()
             player?.replaceCurrentItem(with: nil)
@@ -136,7 +172,7 @@ struct HLSPlayerScreen: View {
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
-                Text(usesVLC ? "VLC 播放" : "正在播放")
+                Text(subtitle ?? (usesVLC ? "VLC 播放" : "正在播放"))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(.white.opacity(0.62))
             }

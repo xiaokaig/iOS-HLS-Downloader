@@ -2,7 +2,7 @@ import SwiftUI
 
 struct TVBoxCatalogView: View {
     let site: TVBoxSite
-    let onPlay: (URL) -> Void
+    let onPlay: (TVBoxPlayback) -> Void
 
     @State private var keyword = ""
     @State private var searchResults: [TVBoxVideo] = []
@@ -199,7 +199,7 @@ struct TVBoxCatalogView: View {
 struct TVBoxVideoDetailView: View {
     let site: TVBoxSite
     let video: TVBoxVideo
-    let onPlay: (URL) -> Void
+    let onPlay: (TVBoxPlayback) -> Void
 
     @State private var detail: TVBoxVideoDetail?
     @State private var isLoading = false
@@ -248,8 +248,8 @@ struct TVBoxVideoDetailView: View {
                                     return
                                 }
                                 isStartingPlayback = true
-                                errorMessage = "正在打开：\(video.name) · \(source.name) · \(episode.name)"
-                                onPlay(url)
+                                errorMessage = nil
+                                onPlay(TVBoxPlayback(videoTitle: video.name, sourceName: source.name, episodeName: episode.name, url: url))
                             } label: {
                                 HStack {
                                     Image(systemName: "play.circle.fill").foregroundStyle(.blue)
@@ -292,7 +292,13 @@ struct TVBoxVideoDetailView: View {
                 let result = try await TVBoxAPIClient.detail(site: site, video: video)
                 guard !Task.isCancelled else { return }
                 detail = result
-                AppDiagnostics.shared.log("TVBOX", "详情加载完成 site=\(site.name) video=\(video.name) seconds=\(String(format: "%.1f", Date().timeIntervalSince(started)))")
+                // Prewarm only the first episode on each route; avoid opening dozens of streams at once.
+                for source in result.playSources.prefix(4) {
+                    if let firstEpisode = source.episodes.first, let url = URL(string: firstEpisode.url) {
+                        TVBoxPlaybackPreloader.shared.preload(url)
+                    }
+                }
+                AppDiagnostics.shared.log("TVBOX", "详情加载完成 site=\(site.name) video=\(video.name) routes=\(result.playSources.count) seconds=\(String(format: "%.1f", Date().timeIntervalSince(started)))")
             } catch {
                 guard !Task.isCancelled else { return }
                 errorMessage = "线路读取失败：\(error.localizedDescription)"

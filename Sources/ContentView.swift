@@ -81,6 +81,9 @@ struct ContentView: View {
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
     @State private var playingHeaders: [String: String] = [:]
+    @State private var playingTitle: String?
+    @State private var playingSubtitle: String?
+    @State private var playingPreloadedAsset: AVURLAsset?
 
     var body: some View {
         browserTab
@@ -118,10 +121,22 @@ struct ContentView: View {
         }
         .fullScreenCover(isPresented: Binding(
             get: { playingURL != nil },
-            set: { if !$0 { playingURL = nil; playingHeaders = [:] } }
+            set: { if !$0 {
+                playingURL = nil
+                playingHeaders = [:]
+                playingTitle = nil
+                playingSubtitle = nil
+                playingPreloadedAsset = nil
+            } }
         )) {
             if let url = playingURL {
-                HLSPlayerScreen(url: url, headers: playingHeaders, onClose: { playingURL = nil; playingHeaders = [:] })
+                HLSPlayerScreen(url: url, headers: playingHeaders, title: playingTitle, subtitle: playingSubtitle, preloadedAsset: playingPreloadedAsset, onClose: {
+                    playingURL = nil
+                    playingHeaders = [:]
+                    playingTitle = nil
+                    playingSubtitle = nil
+                    playingPreloadedAsset = nil
+                })
                     .background(.black)
             }
         }
@@ -362,12 +377,16 @@ struct ContentView: View {
             List {
                 Section("影视源") {
                     NavigationLink {
-                        TVBoxSourceView(onPlay: { url in
-                            // Dismiss the browser-menu sheet before presenting the root full-screen player.
-                            // Presenting both at once can defer the player until the user backs out of TVBox.
+                        TVBoxSourceView(onPlay: { playback in
+                            let asset = TVBoxPlaybackPreloader.shared.asset(for: playback.url)
                             showingBrowserMenu = false
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
-                                openPlayer(url)
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                                openPlayer(
+                                    playback.url,
+                                    title: playback.videoTitle,
+                                    subtitle: "\(playback.sourceName) · \(playback.episodeName)",
+                                    preloadedAsset: asset
+                                )
                             }
                         })
                     } label: {
@@ -1357,12 +1376,22 @@ struct ContentView: View {
         }
     }
 
-    private func openPlayer(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil) {
+    private func openPlayer(
+        _ url: URL,
+        cookies: [HTTPCookie] = [],
+        referrer: URL? = nil,
+        title: String? = nil,
+        subtitle: String? = nil,
+        preloadedAsset: AVURLAsset? = nil
+    ) {
         guard playingURL == nil else { return }
         var headers = HTTPCookie.requestHeaderFields(with: cookies)
         if let referrer { headers["Referer"] = referrer.absoluteString }
         playingHeaders = headers
-        AppDiagnostics.shared.log("PLAYER", "请求播放资源 remote=\(url.isFileURL ? "false" : "true") headers=\(headers.keys.sorted().joined(separator: ","))")
+        playingTitle = title
+        playingSubtitle = subtitle
+        playingPreloadedAsset = preloadedAsset
+        AppDiagnostics.shared.log("PLAYER", "请求播放资源 title=\(title ?? url.lastPathComponent) remote=\(url.isFileURL ? "false" : "true") headers=\(headers.keys.sorted().joined(separator: ","))")
         playingURL = url
     }
 

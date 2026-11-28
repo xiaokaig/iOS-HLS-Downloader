@@ -5,12 +5,14 @@ import VLCKit
 struct VLCPlayerView: UIViewRepresentable {
     let url: URL
     var headers: [String: String] = [:]
-    func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers) }
+    var onStatusChange: (String?) -> Void = { _ in }
+    func makeCoordinator() -> Coordinator { Coordinator(url: url, headers: headers, onStatusChange: onStatusChange) }
     func makeUIView(context: Context) -> UIView {
         let view = UIView()
         let audioSession = AVAudioSession.sharedInstance()
         try? audioSession.setCategory(.playback, mode: .moviePlayback, options: [.allowAirPlay])
         try? audioSession.setActive(true)
+        context.coordinator.player.delegate = context.coordinator
         context.coordinator.player.drawable = view
         context.coordinator.player.media = context.coordinator.makeMedia(url: url)
         context.coordinator.player.play()
@@ -27,11 +29,29 @@ struct VLCPlayerView: UIViewRepresentable {
         coordinator.player.stop()
         coordinator.player.drawable = nil
     }
-    final class Coordinator {
+    final class Coordinator: NSObject, VLCMediaPlayerDelegate {
         let player = VLCMediaPlayer()
         var url: URL
         var headers: [String: String]
-        init(url: URL, headers: [String: String]) { self.url = url; self.headers = headers }
+        let onStatusChange: (String?) -> Void
+        init(url: URL, headers: [String: String], onStatusChange: @escaping (String?) -> Void) {
+            self.url = url
+            self.headers = headers
+            self.onStatusChange = onStatusChange
+        }
+        func mediaPlayerStateChanged(_ notification: Notification!) {
+            let currentState = player.state
+            let message: String?
+            switch currentState {
+            case .opening: message = "正在连接视频源…"
+            case .buffering: message = "正在缓冲视频…"
+            case .playing: message = nil
+            case .error: message = "播放失败：VLC 无法读取该视频地址。"
+            case .ended: message = nil
+            default: message = "正在加载视频源…"
+            }
+            DispatchQueue.main.async { self.onStatusChange(message) }
+        }
         func makeMedia(url: URL) -> VLCMedia {
             let media = VLCMedia(url: url)
             var options: [String: Any] = [:]
