@@ -596,7 +596,7 @@ struct HLSPlayerScreen: View {
     }
 
     private func savePlaybackProgress() {
-        guard let activePlayback, let player else { return }
+        guard let activePlayback else { return }
         let playerPosition = player?.currentTime().seconds ?? lastKnownPlaybackPosition
         let position = playerPosition.isFinite && playerPosition >= 0 ? playerPosition : lastKnownPlaybackPosition
         let playerDuration = player?.currentItem?.duration.seconds ?? lastKnownPlaybackDuration
