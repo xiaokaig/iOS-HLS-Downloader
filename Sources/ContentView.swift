@@ -116,6 +116,15 @@ struct ContentView: View {
         } message: {
             Text(errorMessage ?? "")
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { playingURL != nil },
+            set: { if !$0 { playingURL = nil; playingHeaders = [:] } }
+        )) {
+            if let url = playingURL {
+                HLSPlayerScreen(url: url, headers: playingHeaders, onClose: { playingURL = nil; playingHeaders = [:] })
+                    .background(.black)
+            }
+        }
     }
 
     private var browserTab: some View {
@@ -352,7 +361,7 @@ struct ContentView: View {
         NavigationStack {
             List {
                 Section("影视源") {
-                    NavigationLink { TVBoxSourceView() } label: {
+                    NavigationLink { TVBoxSourceView(onPlay: { openPlayer($0) }) } label: {
                         Label("TVBox 源解析", systemImage: "play.tv")
                     }
                 }
@@ -944,15 +953,6 @@ struct ContentView: View {
                 }
             }
         }
-        .fullScreenCover(isPresented: Binding(
-            get: { playingURL != nil },
-            set: { if !$0 { playingURL = nil } }
-        )) {
-            if let url = playingURL {
-                HLSPlayerScreen(url: url, headers: playingHeaders, onClose: { playingURL = nil; playingHeaders = [:] })
-                    .background(.black)
-            }
-        }
     }
 
     private var settingsTab: some View {
@@ -1059,13 +1059,23 @@ struct ContentView: View {
                     TextField("二步验证码（如启用）", text: $alistOTPCode)
                         .keyboardType(.numberPad)
                     Toggle("上传时选择目录", isOn: $alistChooseDirectoryOnUpload)
-                    HStack {
-                        Text("默认上传目录")
-                        Spacer()
-                        Text(alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
+                    Button {
+                        pendingAListUploadURL = nil
+                        alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
+                        showingAListDirectoryPicker = true
+                    } label: {
+                        HStack {
+                            Label("固定上传目录", systemImage: "folder")
+                            Spacer()
+                            Text(alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                        }
                     }
+                    .buttonStyle(.plain)
                     Text("关闭时直接上传到记住的目录；开启后每次上传前可浏览并选择 AList 文件夹，选择结果会自动记住。")
                         .font(.caption).foregroundStyle(.secondary)
                     HStack {
@@ -1437,11 +1447,11 @@ struct ContentView: View {
     }
 
     private func confirmAListDirectorySelection() {
-        alistTargetDirectory = alistDirectoryPath
+        alistTargetDirectory = alistDirectoryPath.isEmpty ? "/" : alistDirectoryPath
         showingAListDirectoryPicker = false
         guard let fileURL = pendingAListUploadURL else { return }
         pendingAListUploadURL = nil
-        uploadToAList(fileURL)
+        performAListUpload(fileURL, targetDirectory: alistTargetDirectory)
     }
 
     private var effectiveAListPassword: String {
@@ -1477,12 +1487,26 @@ struct ContentView: View {
     }
 
     private func uploadToAList(_ fileURL: URL) {
-        let password = alistPassword.isEmpty ? (AListCredentialStore.loadPassword() ?? "") : alistPassword
+        let password = effectiveAListPassword
         guard !alistBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              !alistUsername.isEmpty, !password.isEmpty else {
+              !alistUsername.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              !password.isEmpty else {
             errorMessage = "请先到设置 → AList 上传，填写服务器地址、账号和密码并测试连接。"
             return
         }
+
+        if alistChooseDirectoryOnUpload {
+            pendingAListUploadURL = fileURL
+            alistDirectoryPath = alistTargetDirectory.isEmpty ? "/" : alistTargetDirectory
+            alistDirectories = []
+            showingAListDirectoryPicker = true
+        } else {
+            performAListUpload(fileURL, targetDirectory: alistTargetDirectory)
+        }
+    }
+
+    private func performAListUpload(_ fileURL: URL, targetDirectory: String) {
+        let password = effectiveAListPassword
         Task {
             do {
                 try await alistUploader.upload(
@@ -1491,7 +1515,7 @@ struct ContentView: View {
                     username: alistUsername,
                     password: password,
                     otpCode: alistOTPCode,
-                    targetDirectory: alistTargetDirectory
+                    targetDirectory: targetDirectory
                 )
                 uploadedFileURLs.insert(fileURL.absoluteString)
             } catch {
