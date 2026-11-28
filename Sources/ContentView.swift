@@ -214,6 +214,7 @@ struct ContentView: View {
     // Local files
     @State private var localFiles: [URL] = []
     @State private var playingURL: URL?
+    @State private var localPlayingURL: URL?
     @State private var playingHeaders: [String: String] = [:]
     @State private var playingTitle: String?
     @State private var playingSubtitle: String?
@@ -1109,6 +1110,15 @@ struct ContentView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("下载管理")
             .navigationBarTitleDisplayMode(.inline)
+            .fullScreenCover(isPresented: Binding(
+                get: { localPlayingURL != nil },
+                set: { if !$0 { localPlayingURL = nil } }
+            )) {
+                if let url = localPlayingURL {
+                    HLSPlayerScreen(url: url, onClose: { localPlayingURL = nil })
+                        .background(.black)
+                }
+            }
         }
     }
 
@@ -1193,6 +1203,15 @@ struct ContentView: View {
                 Button("取消", role: .cancel) { renameTarget = nil }
             } message: {
                 Text("文件扩展名会自动保留。")
+            }
+            .fullScreenCover(isPresented: Binding(
+                get: { localPlayingURL != nil },
+                set: { if !$0 { localPlayingURL = nil } }
+            )) {
+                if let url = localPlayingURL {
+                    HLSPlayerScreen(url: url, onClose: { localPlayingURL = nil })
+                        .background(.black)
+                }
             }
         }
     }
@@ -1599,6 +1618,12 @@ struct ContentView: View {
         preloadedAsset: AVURLAsset? = nil,
         downloadAction: (() -> Void)? = nil
     ) {
+        if url.isFileURL {
+            guard localPlayingURL == nil else { return }
+            localPlayingURL = url
+            AppDiagnostics.shared.log("PLAYER", "从本地文件管理器直接打开：\(url.lastPathComponent)")
+            return
+        }
         guard playingURL == nil else { return }
         var headers = HTTPCookie.requestHeaderFields(with: cookies)
         if let referrer { headers["Referer"] = referrer.absoluteString }
