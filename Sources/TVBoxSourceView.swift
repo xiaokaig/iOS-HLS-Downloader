@@ -9,6 +9,8 @@ private struct TVBoxSourceHistoryEntry: Codable, Identifiable {
 
 struct TVBoxSourceView: View {
     let downloadQueue: DownloadQueueManager
+    let onOpenDownloads: () -> Void
+    let onOpenFiles: () -> Void
     @AppStorage("tvboxSourceHistory") private var sourceHistoryJSON = "[]"
     @AppStorage("tvboxCurrentSourceAddress") private var sourceAddress = ""
     @AppStorage("tvboxParsedSourceCache") private var parsedSourceCacheJSON = ""
@@ -32,6 +34,23 @@ struct TVBoxSourceView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
+                HStack(spacing: 10) {
+                    Button(action: onOpenDownloads) {
+                        Label("下载管理", systemImage: "arrow.down.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                    Button(action: onOpenFiles) {
+                        Label("已下载", systemImage: "folder.fill")
+                            .font(.subheadline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 12))
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 VStack(alignment: .leading, spacing: 13) {
                     Label("当前影视源", systemImage: "dot.radiowaves.left.and.right")
                         .font(.headline)
