@@ -247,7 +247,7 @@ final class HLSDownloadManager: ObservableObject {
 
         var finalURL = destination
         if !hasMap {
-            if downloadSegments.contains(where: \.startsDiscontinuity) {
+            if mediaPlaylist.segments.contains(where: \.startsDiscontinuity) {
                 conversionWarning = "检测到 HLS 时间线断点（EXT-X-DISCONTINUITY），已跳过 MP4 转封装并保留原始 TS，避免转换时丢失后续画面。"
             } else {
                 status = "正在尝试 MP4 转封装…"
@@ -261,14 +261,15 @@ final class HLSDownloadManager: ObservableObject {
         outputURL = finalURL
         preserveDestination = true
         try? FileManager.default.removeItem(at: taskDirectory)
+        let adSummary = stripMarkedAds && markedAdCount > 0 ? "（已跳过 \\(markedAdCount) 个广告分片）" : ""
         if finalURL.pathExtension.lowercased() == "mp4" {
-            status = "下载完成（MP4）"
+            status = "下载完成（MP4）\\(adSummary)"
         } else if conversionWarning?.contains("时间线断点") == true {
-            status = "下载完成（TS，保留原始时间线）"
+            status = "下载完成（TS，保留原始时间线）\\(adSummary)"
         } else if conversionWarning != nil {
-            status = "下载完成（TS，MP4 转换失败）"
+            status = "下载完成（TS，MP4 转换失败）\\(adSummary)"
         } else {
-            status = "下载完成（TS）"
+            status = "下载完成（TS）\\(adSummary)"
         }
         return finalURL
     }

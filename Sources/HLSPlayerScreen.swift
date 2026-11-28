@@ -426,7 +426,9 @@ struct HLSPlayerScreen: View {
                                 Text(source.name)
                                 Spacer()
                                 Button("下载本线路") {
-                                    for episode in source.episodes { enqueueTVBoxDownload(episode.url) }
+                                    for episode in source.episodes {
+                                        enqueueTVBoxDownload(episode.url, fileName: "\\(activePlayback.videoTitle)_\\(episode.name)")
+                                    }
                                 }
                                 .font(.caption)
                                 .disabled(!source.episodes.contains { Self.isDownloadable(URL(string: $0.url) ?? URL(fileURLWithPath: "/")) })

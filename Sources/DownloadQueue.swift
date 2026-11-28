@@ -247,7 +247,7 @@ final class DownloadQueueManager: ObservableObject {
         item.outputURL = output
         item.progress = 1
         item.state = .completed
-        item.status = "下载完成"
+        item.status = item.hlsManager?.status ?? "下载完成"
         onCompleted?(output, item.sourceURL)
         notifyCompletion(item.title)
         finishBackgroundTaskIfIdle()
