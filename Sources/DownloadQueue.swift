@@ -35,7 +35,7 @@ enum DownloadQueueKind {
 @MainActor
 final class DownloadQueueItem: ObservableObject, Identifiable {
     let id = UUID()
-    let kind: DownloadQueueKind
+    var kind: DownloadQueueKind
     let hlsManager: HLSDownloadManager?
     let directManager: DirectVideoDownloadManager?
 
@@ -103,7 +103,12 @@ final class DownloadQueueManager: ObservableObject {
     func enqueueHLS(_ url: URL, cookies: [HTTPCookie] = [], fileName: String? = nil, stripMarkedAds: Bool = true) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
             if existing.state == .queued, let fileName, !fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                existing.kind = .hls(url, cookies, fileName, stripMarkedAds)
+                switch existing.kind {
+                case .hls:
+                    existing.kind = .hls(url, cookies, fileName, stripMarkedAds)
+                case .direct(_, let existingCookies, let existingReferrer, _):
+                    existing.kind = .direct(url, existingCookies, existingReferrer, fileName)
+                }
             }
             return existing
         }
@@ -117,7 +122,12 @@ final class DownloadQueueManager: ObservableObject {
     func enqueueDirect(_ url: URL, cookies: [HTTPCookie] = [], referrer: URL? = nil, fileName: String? = nil) -> DownloadQueueItem {
         if let existing = items.first(where: { $0.sourceURL == url && [.queued, .downloading, .paused].contains($0.state) }) {
             if existing.state == .queued, let fileName, !fileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                existing.kind = .direct(url, cookies, referrer, fileName)
+                switch existing.kind {
+                case .hls(_, let existingCookies, _, let existingStripMarkedAds):
+                    existing.kind = .hls(url, existingCookies, fileName, existingStripMarkedAds)
+                case .direct:
+                    existing.kind = .direct(url, cookies, referrer, fileName)
+                }
             }
             return existing
         }
