@@ -41,8 +41,8 @@ final class HLSDownloadManager: ObservableObject {
 
     func inspectPlaylist(_ url: URL, cookies: [HTTPCookie] = []) async throws -> HLSInspection {
         status = "解析播放列表…"
-        let fetched = try await fetchText(url, cookies: cookies)
-        let parsed = try HLSParser.parse(fetched.text, baseURL: fetched.finalURL)
+        let text = try await fetchText(url, cookies: cookies)
+        let parsed = try HLSParser.parse(text, baseURL: url)
         return HLSInspection(
             variants: parsed.variants,
             segmentCount: parsed.segments.count,
@@ -68,8 +68,8 @@ final class HLSDownloadManager: ObservableObject {
         var playlistURL = url
         var playlist: HLSPlaylist?
         for _ in 0..<4 {
-            let fetched = try await fetchText(playlistURL, cookies: cookies)
-            let parsed = try HLSParser.parse(fetched.text, baseURL: fetched.finalURL)
+            let text = try await fetchText(playlistURL, cookies: cookies)
+            let parsed = try HLSParser.parse(text, baseURL: playlistURL)
             if parsed.variants.isEmpty {
                 playlist = parsed
                 break
@@ -250,8 +250,6 @@ final class HLSDownloadManager: ObservableObject {
         try? FileManager.default.removeItem(at: taskDirectory)
         if finalURL.pathExtension.lowercased() == "mp4" {
             status = "下载完成（MP4）"
-        } else if conversionWarning?.contains("时间线断点") == true {
-            status = "下载完成（TS，保留原始时间线）"
         } else if conversionWarning != nil {
             status = "下载完成（TS，MP4 转换失败）"
         } else {
@@ -344,7 +342,7 @@ final class HLSDownloadManager: ObservableObject {
         }
     }
 
-    private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> (text: String, finalURL: URL) {
+    private func fetchText(_ url: URL, cookies: [HTTPCookie]) async throws -> String {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         applyCookies(cookies, for: url, to: &request)
@@ -352,7 +350,7 @@ final class HLSDownloadManager: ObservableObject {
         guard let http = response as? HTTPURLResponse else { throw HLSDownloadError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else { throw HLSDownloadError.httpStatus(http.statusCode) }
         guard let text = String(data: data, encoding: .utf8) else { throw HLSDownloadError.invalidResponse }
-        return (text, http.url ?? url)
+        return text
     }
 
     private func fetchKey(_ key: HLSKey, cookies: [HTTPCookie]) async throws -> Data {

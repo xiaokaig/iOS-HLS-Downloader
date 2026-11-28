@@ -70,6 +70,9 @@ struct HLSPlayerScreen: View {
     @State private var periodicTimeObserver: Any?
     @State private var resumeAppliedURL = ""
     @State private var resumePositionState = 0.0
+    @State private var lastKnownPlaybackPosition = 0.0
+    @State private var lastKnownPlaybackDuration = 0.0
+    @State private var lastPersistedPlaybackPosition = 0.0
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
     @State private var controlsVisible = true
@@ -94,6 +97,13 @@ struct HLSPlayerScreen: View {
                     VLCPlayerView(url: currentURL, headers: headers, onStatusChange: { status in
                         vlcStatusMessage = status
                         if let status, status.hasPrefix("播放失败") { playerErrorMessage = status }
+                    }, onProgressChange: { position, duration in
+                        lastKnownPlaybackPosition = position
+                        lastKnownPlaybackDuration = duration
+                        if position - lastPersistedPlaybackPosition >= 10, let activePlayback {
+                            lastPersistedPlaybackPosition = position
+                            onPlaybackProgress?(activePlayback, position, duration)
+                        }
                     })
                     .id(currentURL.absoluteString)
                 } else {
@@ -203,6 +213,9 @@ struct HLSPlayerScreen: View {
             vlcStatusMessage = "正在连接视频源…"
             downloadFeedback = nil
             if usesVLC {
+                lastKnownPlaybackPosition = 0
+                lastKnownPlaybackDuration = 0
+                lastPersistedPlaybackPosition = 0
                 if let periodicTimeObserver, let player { player.removeTimeObserver(periodicTimeObserver) }
                 periodicTimeObserver = nil
                 player?.pause()
@@ -427,6 +440,9 @@ struct HLSPlayerScreen: View {
         savePlaybackProgress()
         resumeAppliedURL = ""
         resumePositionState = 0
+        lastKnownPlaybackPosition = 0
+        lastKnownPlaybackDuration = 0
+        lastPersistedPlaybackPosition = 0
         activePlayback = TVBoxPlayback(
             videoTitle: playback.videoTitle,
             sourceName: source.name,
@@ -524,7 +540,12 @@ struct HLSPlayerScreen: View {
                 guard let activePlayback,
                       time.seconds.isFinite, time.seconds >= 0 else { return }
                 let duration = player.currentItem?.duration.seconds ?? 0
-                onPlaybackProgress?(activePlayback, time.seconds, duration.isFinite ? duration : 0)
+                lastKnownPlaybackPosition = time.seconds
+                lastKnownPlaybackDuration = duration.isFinite ? duration : 0
+                if time.seconds - lastPersistedPlaybackPosition >= 10 {
+                    lastPersistedPlaybackPosition = time.seconds
+                    onPlaybackProgress?(activePlayback, time.seconds, lastKnownPlaybackDuration)
+                }
             }
         }
     }
@@ -576,10 +597,11 @@ struct HLSPlayerScreen: View {
 
     private func savePlaybackProgress() {
         guard let activePlayback, let player else { return }
-        let position = player.currentTime().seconds
-        let duration = player.currentItem?.duration.seconds ?? 0
-        guard position.isFinite, position >= 0 else { return }
-        onPlaybackProgress?(activePlayback, position, duration.isFinite ? duration : 0)
+        let playerPosition = player?.currentTime().seconds ?? lastKnownPlaybackPosition
+        let position = playerPosition.isFinite && playerPosition >= 0 ? playerPosition : lastKnownPlaybackPosition
+        let playerDuration = player?.currentItem?.duration.seconds ?? lastKnownPlaybackDuration
+        let duration = playerDuration.isFinite ? playerDuration : lastKnownPlaybackDuration
+        onPlaybackProgress?(activePlayback, position, duration)
     }
 
     private func closePlayer() {
