@@ -10,6 +10,8 @@ struct HLSPlayerScreen: View {
     @State private var player: AVPlayer?
     @State private var playbackRate = 1.0
     @State private var dragOffset: CGFloat = 0
+    @State private var controlsVisible = true
+    @State private var hideControlsTask: Task<Void, Never>?
 
     private var usesVLC: Bool {
         ["ts", "mkv", "avi", "webm"].contains(url.pathExtension.lowercased())
@@ -34,85 +36,42 @@ struct HLSPlayerScreen: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scaleEffect(fillScreen ? 1.12 : 1)
             .clipped()
-            .overlay(alignment: .top) {
-                LinearGradient(
-                    colors: [.black.opacity(0.72), .black.opacity(0.28), .clear],
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
-                .frame(height: 150)
-                .allowsHitTesting(false)
-            }
-            .overlay(alignment: .top) {
-                HStack(spacing: 12) {
-                    Button(action: closePlayer) {
-                        Image(systemName: "chevron.down")
-                            .font(.system(size: 16, weight: .bold))
-                            .foregroundStyle(.white)
-                            .frame(width: 42, height: 42)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel("返回浏览器")
+            .ignoresSafeArea()
 
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(displayName)
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .lineLimit(1)
-                        Text(usesVLC ? "本地视频 · VLC" : "本地视频")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.68))
+            if controlsVisible {
+                VStack(spacing: 0) {
+                    header
+                    Spacer(minLength: 20)
+                    HStack {
+                        Spacer()
+                        sideControls
                     }
-
-                    Spacer(minLength: 8)
-
-                    if !usesVLC {
-                        Menu {
-                            ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
-                                Button {
-                                    setPlaybackRate(rate)
-                                } label: {
-                                    if playbackRate == rate {
-                                        Label("\(rate, specifier: "%.2g")×", systemImage: "checkmark")
-                                    } else {
-                                        Text("\(rate, specifier: "%.2g")×")
-                                    }
-                                }
-                            }
-                        } label: {
-                            Text("\(playbackRate, specifier: "%.2g")×")
-                                .font(.system(size: 13, weight: .semibold, design: .rounded))
-                                .foregroundStyle(.white)
-                                .padding(.horizontal, 13)
-                                .frame(height: 38)
-                                .background(.ultraThinMaterial, in: Capsule())
-                        }
-                        .accessibilityLabel("播放速度")
-                    }
-
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.2)) { fillScreen.toggle() }
-                    } label: {
-                        Image(systemName: fillScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(.white)
-                            .frame(width: 38, height: 38)
-                            .background(.ultraThinMaterial, in: Circle())
-                    }
-                    .accessibilityLabel(fillScreen ? "还原画面" : "填充画面")
+                    Spacer(minLength: 20)
                 }
-                .padding(.horizontal, 18)
-                .padding(.top, 12)
+                .padding(.horizontal, 22)
+                .padding(.top, 8)
+                .padding(.bottom, 18)
+                .transition(.opacity)
             }
         }
         .offset(y: dragOffset)
-        .statusBarHidden(true)
+        .statusBarHidden(false)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                withAnimation(.easeInOut(duration: 0.18)) {
+                    controlsVisible.toggle()
+                }
+                if controlsVisible { scheduleControlsHide() }
+                else { hideControlsTask?.cancel() }
+            }
+        )
         .simultaneousGesture(
             DragGesture(minimumDistance: 18)
                 .onChanged { value in
                     guard value.translation.height > 0,
                           abs(value.translation.height) > abs(value.translation.width) * 1.2 else { return }
-                    dragOffset = min(value.translation.height, 240)
+                    dragOffset = min(value.translation.height, 260)
                 }
                 .onEnded { value in
                     let isDownward = value.translation.height > 0 &&
@@ -133,11 +92,107 @@ struct HLSPlayerScreen: View {
                 player = newPlayer
                 newPlayer.play()
             }
+            scheduleControlsHide()
         }
         .onDisappear {
+            hideControlsTask?.cancel()
             player?.pause()
             player?.replaceCurrentItem(with: nil)
             player = nil
+        }
+    }
+
+    private var header: some View {
+        HStack(alignment: .top, spacing: 14) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(displayName)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+                Text(usesVLC ? "VLC 播放" : "正在播放")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.62))
+            }
+            Spacer(minLength: 12)
+            Button(action: closePlayer) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.42), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+            }
+            .accessibilityLabel("关闭播放器")
+        }
+        .padding(.top, 4)
+        .background(alignment: .top) {
+            LinearGradient(
+                colors: [.black.opacity(0.62), .black.opacity(0.18), .clear],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .frame(height: 100)
+            .padding(.horizontal, -22)
+            .padding(.top, -12)
+            .allowsHitTesting(false)
+        }
+    }
+
+    private var sideControls: some View {
+        VStack(spacing: 12) {
+            if !usesVLC {
+                Menu {
+                    ForEach([0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { rate in
+                        Button {
+                            setPlaybackRate(rate)
+                        } label: {
+                            if playbackRate == rate {
+                                Label("\(rate, specifier: "%.2g")×", systemImage: "checkmark")
+                            } else {
+                                Text("\(rate, specifier: "%.2g")×")
+                            }
+                        }
+                    }
+                } label: {
+                    VStack(spacing: 3) {
+                        Image(systemName: "speedometer")
+                            .font(.system(size: 17, weight: .medium))
+                        Text("\(playbackRate, specifier: "%.2g")×")
+                            .font(.system(size: 10, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(.black.opacity(0.46), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+                }
+                .accessibilityLabel("播放速度")
+            }
+
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { fillScreen.toggle() }
+                scheduleControlsHide()
+            } label: {
+                Image(systemName: fillScreen ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right")
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(.black.opacity(0.46), in: Circle())
+                    .overlay(Circle().stroke(.white.opacity(0.14), lineWidth: 1))
+            }
+            .accessibilityLabel(fillScreen ? "还原画面" : "填充画面")
+        }
+    }
+
+    private func scheduleControlsHide() {
+        hideControlsTask?.cancel()
+        hideControlsTask = Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                withAnimation(.easeOut(duration: 0.25)) {
+                    controlsVisible = false
+                }
+            }
         }
     }
 
@@ -149,9 +204,11 @@ struct HLSPlayerScreen: View {
         } else {
             player.defaultRate = Float(rate)
         }
+        scheduleControlsHide()
     }
 
     private func closePlayer() {
+        hideControlsTask?.cancel()
         player?.pause()
         onClose()
     }
