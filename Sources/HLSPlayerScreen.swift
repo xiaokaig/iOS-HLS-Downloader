@@ -77,6 +77,7 @@ struct HLSPlayerScreen: View {
     @State private var filteredPlaylistURL: URL?
     @State private var filteredPlaylistSourceURL: URL?
     @State private var adFilterFailedSourceURL: URL?
+    @State private var adFilterTask: Task<Void, Never>?
     @State private var isPreparingFilteredPlaylist = false
     @State private var vlcIsPlaying = true
     @State private var vlcSeekRequest: Double?
@@ -268,6 +269,7 @@ struct HLSPlayerScreen: View {
             itemObservation = nil
             timeControlObservation = nil
             hideControlsTask?.cancel()
+            adFilterTask?.cancel()
             savePlaybackProgress()
             if let periodicTimeObserver, let player { player.removeTimeObserver(periodicTimeObserver) }
             periodicTimeObserver = nil
@@ -609,8 +611,9 @@ struct HLSPlayerScreen: View {
             return
         }
 
+        adFilterTask?.cancel()
         isPreparingFilteredPlaylist = true
-        Task {
+        adFilterTask = Task {
             do {
                 let result = try await HLSPlaybackAdFilter.prepare(url: activePlayback.url, headers: headers)
                 await MainActor.run {
@@ -627,6 +630,7 @@ struct HLSPlayerScreen: View {
                     }
                 }
             } catch {
+                if Task.isCancelled { return }
                 await MainActor.run {
                     guard self.activePlayback?.url == activePlayback.url else { return }
                     isPreparingFilteredPlaylist = false
