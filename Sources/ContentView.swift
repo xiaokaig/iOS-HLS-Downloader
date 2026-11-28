@@ -1692,7 +1692,15 @@ struct ContentView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { showingAListDirectoryPicker = false; pendingAListUploadURL = nil }
+                    Button("取消") {
+                        let shouldReturnToFiles = returnToFilesAfterAListPicker
+                        returnToFilesAfterAListPicker = false
+                        showingAListDirectoryPicker = false
+                        pendingAListUploadURL = nil
+                        if shouldReturnToFiles {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { showingFiles = true }
+                        }
+                    }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { loadAListDirectories() } label: { Image(systemName: "arrow.clockwise") }
